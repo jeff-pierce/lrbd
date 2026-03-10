@@ -7,16 +7,9 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
-// ── User ID: generated once per device, persisted in localStorage ──
-function getUserId() {
-  let id = localStorage.getItem("lrbd_user_id");
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem("lrbd_user_id", id);
-  }
-  return id;
-}
-const USER_ID = getUserId();
+// ── User ID: hardcoded permanent ID, same across all devices ──
+
+const USER_ID = "d37bd602-65bb-4c95-b1fd-9a42ff87a6b3";
 
 // ── Metrics config ────────────────────────────────────────────
 const METRICS = [
