@@ -420,12 +420,21 @@ export default function App() {
   const pendingRef = useRef({});
   const debounceRef = useRef({});
 
+  const loadData = useCallback(async (isInitialLoad = false) => {
+    setSyncStatus(isInitialLoad ? "loading" : "syncing");
+    try {
+      const data = await fetchAllData();
+      setAllData(data);
+      setSyncStatus("synced");
+    } catch {
+      setSyncStatus("error");
+    }
+  }, []);
+
   // Load all data from Supabase on mount
   useEffect(() => {
-    fetchAllData()
-      .then(data => { setAllData(data); setSyncStatus("synced"); })
-      .catch(() => setSyncStatus("error"));
-  }, []);
+    loadData(true);
+  }, [loadData]);
 
   // Debounced upsert — waits 800ms after last tap before writing to Supabase
   const scheduleUpsert = useCallback((date, metricId, value) => {
@@ -489,6 +498,40 @@ export default function App() {
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
               <div style={{ fontSize: 11, letterSpacing: "0.2em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", fontFamily: "'DM Mono', monospace" }}>LRBD Tracker</div>
               <SyncDot status={syncStatus} />
+              <button
+                onClick={() => loadData(false)}
+                disabled={syncStatus === "loading" || syncStatus === "syncing"}
+                aria-label="Refresh data"
+                title="Refresh data"
+                style={{
+                  width: 18,
+                  height: 18,
+                  borderRadius: 6,
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  background: "rgba(255,255,255,0.04)",
+                  color: "rgba(255,255,255,0.55)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 11,
+                  lineHeight: 1,
+                  cursor: syncStatus === "loading" || syncStatus === "syncing" ? "default" : "pointer",
+                  opacity: syncStatus === "loading" || syncStatus === "syncing" ? 0.45 : 1,
+                  transition: "all 0.15s",
+                }}
+                onMouseEnter={e => {
+                  if (syncStatus !== "loading" && syncStatus !== "syncing") {
+                    e.currentTarget.style.background = "rgba(255,255,255,0.1)";
+                    e.currentTarget.style.color = "rgba(255,255,255,0.85)";
+                  }
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.background = "rgba(255,255,255,0.04)";
+                  e.currentTarget.style.color = "rgba(255,255,255,0.55)";
+                }}
+              >
+                ↻
+              </button>
             </div>
             <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.02em" }}>
               {tab === "week" ? "This Week" : tab === "history" ? "History" : selectedDate === todayStr() ? "Today" : formatDate(selectedDate)}
