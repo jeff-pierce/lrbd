@@ -27,6 +27,16 @@ const WEEKLY_METRICS = METRICS.filter(m => m.cadence === "weekly");
 // ── Date helpers ──────────────────────────────────────────────
 const todayStr = () => new Date().toISOString().split("T")[0];
 
+const shiftDateByDays = (dateStr, days) => {
+  const d = new Date(dateStr + "T00:00:00");
+  d.setDate(d.getDate() + days);
+  return d.toISOString().split("T")[0];
+};
+
+const isYesterday = (dateStr) => dateStr === shiftDateByDays(todayStr(), -1);
+const isFutureDate = (dateStr) => dateStr > todayStr();
+const KEY_HINT_STORAGE_KEY = "lrbd_seen_arrow_key_hint";
+
 const formatDate = (dateStr) => {
   const d = new Date(dateStr + "T00:00:00");
   return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
@@ -417,6 +427,7 @@ export default function App() {
   const [selectedDate, setSelectedDate] = useState(todayStr());
   const [tab, setTab]               = useState("today");
   const [syncStatus, setSyncStatus] = useState("loading");
+  const [showKeyHint, setShowKeyHint] = useState(false);
   const pendingRef = useRef({});
   const debounceRef = useRef({});
 
@@ -435,6 +446,50 @@ export default function App() {
   useEffect(() => {
     loadData(true);
   }, [loadData]);
+
+  const dismissKeyHint = useCallback(() => {
+    setShowKeyHint(false);
+    try {
+      window.localStorage.setItem(KEY_HINT_STORAGE_KEY, "1");
+    } catch {
+      // Ignore storage access errors in restricted environments.
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(KEY_HINT_STORAGE_KEY) !== "1") {
+        setShowKeyHint(true);
+      }
+    } catch {
+      setShowKeyHint(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (tab !== "today") return;
+      const target = e.target;
+      const tag = target?.tagName?.toLowerCase();
+      const isTypingContext = tag === "input" || tag === "textarea" || tag === "select" || target?.isContentEditable;
+      if (isTypingContext) return;
+
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        dismissKeyHint();
+        setSelectedDate(prev => shiftDateByDays(prev, -1));
+      }
+
+      if (e.key === "ArrowRight" && selectedDate !== todayStr()) {
+        e.preventDefault();
+        dismissKeyHint();
+        setSelectedDate(prev => shiftDateByDays(prev, 1));
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [tab, selectedDate, dismissKeyHint]);
 
   // Debounced upsert — waits 800ms after last tap before writing to Supabase
   const scheduleUpsert = useCallback((date, metricId, value) => {
@@ -477,6 +532,7 @@ export default function App() {
 
   const dailyGoalsHit = DAILY_METRICS.filter(m => (dayData[m.id] || 0) >= m.goal).length;
   const history = Object.entries(allData).sort(([a], [b]) => b.localeCompare(a)).slice(0, 14);
+  const selectedWeekDays = getWeekDays(getMondayOf(selectedDate));
 
   return (
     <div style={{ minHeight: "100vh", background: "#0A0A0F", fontFamily: "'Sora', sans-serif", color: "#fff", padding: "0 0 60px" }}>
@@ -487,7 +543,9 @@ export default function App() {
         ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
         @keyframes pulse { 0%,100%{opacity:.5} 50%{opacity:1} }
         @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes dateShiftIn { from{opacity:0;transform:translateX(8px) translateY(2px)} to{opacity:1;transform:translateX(0) translateY(0)} }
         .card-appear { animation: fadeIn 0.3s ease forwards; }
+        .date-shift { animation: dateShiftIn 0.24s cubic-bezier(0.2,0.8,0.2,1); }
         button:active { transform: scale(0.95); }
       `}</style>
 
@@ -576,20 +634,167 @@ export default function App() {
         {/* TODAY TAB */}
         {tab === "today" && syncStatus !== "loading" && (
           <div className="card-appear">
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
-              <input type="date" value={selectedDate} max={todayStr()} onChange={e => setSelectedDate(e.target.value)} style={{
-                background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
-                borderRadius: 10, padding: "8px 12px", color: "#fff",
-                fontFamily: "'DM Mono', monospace", fontSize: 12, cursor: "pointer", outline: "none", colorScheme: "dark",
-              }} />
-              {selectedDate !== todayStr() && (
-                <button onClick={() => setSelectedDate(todayStr())} style={{
-                  background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
-                  borderRadius: 10, padding: "8px 12px", color: "rgba(255,255,255,0.5)",
-                  fontFamily: "'DM Mono', monospace", fontSize: 11, cursor: "pointer",
-                }}>← Today</button>
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "44px 1fr 44px",
+              alignItems: "center",
+              gap: 10,
+              marginBottom: 20,
+            }}>
+              <button
+                onClick={() => setSelectedDate(prev => shiftDateByDays(prev, -1))}
+                aria-label="Previous day"
+                title="Previous day"
+                style={{
+                  width: 44,
+                  height: 36,
+                  borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  background: "rgba(255,255,255,0.05)",
+                  color: "rgba(255,255,255,0.7)",
+                  fontSize: 18,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                ←
+              </button>
+              <div style={{
+                textAlign: "center",
+                fontFamily: "'DM Mono', monospace",
+                fontSize: 13,
+                color: "rgba(255,255,255,0.88)",
+                letterSpacing: "0.03em",
+                textTransform: "uppercase",
+              }}>
+                {selectedDate === todayStr() ? "Today" : formatDate(selectedDate)}
+              </div>
+              {selectedDate === todayStr() ? (
+                <div />
+              ) : isYesterday(selectedDate) ? (
+                <button
+                  onClick={() => setSelectedDate(todayStr())}
+                  aria-label="Go to today"
+                  title="Go to today"
+                  style={{
+                    width: 44,
+                    height: 36,
+                    borderRadius: 10,
+                    border: "1px solid rgba(255,255,255,0.1)",
+                    background: "rgba(255,255,255,0.05)",
+                    color: "rgba(255,255,255,0.72)",
+                    fontFamily: "'DM Mono', monospace",
+                    fontSize: 10,
+                    fontWeight: 600,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                    cursor: "pointer",
+                  }}
+                >
+                  Today
+                </button>
+              ) : (
+                <button
+                  onClick={() => setSelectedDate(prev => shiftDateByDays(prev, 1))}
+                  aria-label="Next day"
+                  title="Next day"
+                  style={{
+                    width: 44,
+                    height: 36,
+                    borderRadius: 10,
+                    border: "1px solid rgba(255,255,255,0.1)",
+                    background: "rgba(255,255,255,0.05)",
+                    color: "rgba(255,255,255,0.7)",
+                    fontSize: 18,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  →
+                </button>
               )}
             </div>
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(5, 1fr)",
+              gap: 8,
+              marginBottom: 20,
+            }}>
+              {selectedWeekDays.map((d) => {
+                const isActive = d === selectedDate;
+                const disabled = isFutureDate(d);
+                const isTodayChip = d === todayStr();
+                const dayLabel = new Date(d + "T00:00:00").toLocaleDateString("en-US", { weekday: "short" });
+                const dateLabel = new Date(d + "T00:00:00").toLocaleDateString("en-US", { day: "numeric" });
+
+                return (
+                  <button
+                    key={d}
+                    onClick={() => !disabled && setSelectedDate(d)}
+                    disabled={disabled}
+                    aria-label={`Select ${dayLabel} ${dateLabel}`}
+                    title={disabled ? "Future day" : `${dayLabel} ${dateLabel}`}
+                    style={{
+                      position: "relative",
+                      borderRadius: 10,
+                      border: isActive ? "1px solid rgba(255,255,255,0.35)" : "1px solid rgba(255,255,255,0.1)",
+                      background: isActive ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.04)",
+                      color: disabled ? "rgba(255,255,255,0.18)" : isActive ? "#fff" : "rgba(255,255,255,0.65)",
+                      padding: "7px 0 8px",
+                      cursor: disabled ? "not-allowed" : "pointer",
+                      fontFamily: "'DM Mono', monospace",
+                      transition: "all 0.2s",
+                      opacity: disabled ? 0.7 : 1,
+                    }}
+                  >
+                    <div style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: "0.08em" }}>{dayLabel}</div>
+                    <div style={{ fontSize: 13, marginTop: 2, fontWeight: isActive ? 700 : 500 }}>{dateLabel}</div>
+                    {isTodayChip && (
+                      <span
+                        aria-hidden="true"
+                        style={{
+                          position: "absolute",
+                          top: 6,
+                          right: 6,
+                          width: 5,
+                          height: 5,
+                          borderRadius: "50%",
+                          background: "#00C6A7",
+                          boxShadow: "0 0 6px rgba(0,198,167,0.75)",
+                        }}
+                      />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            {showKeyHint && tab === "today" && (
+              <button
+                onClick={dismissKeyHint}
+                style={{
+                  width: "100%",
+                  marginBottom: 18,
+                  border: "1px dashed rgba(255,255,255,0.18)",
+                  borderRadius: 10,
+                  background: "rgba(255,255,255,0.03)",
+                  color: "rgba(255,255,255,0.55)",
+                  padding: "8px 10px",
+                  fontSize: 11,
+                  fontFamily: "'DM Mono', monospace",
+                  letterSpacing: "0.03em",
+                  cursor: "pointer",
+                }}
+                aria-label="Dismiss keyboard shortcut hint"
+                title="Dismiss"
+              >
+                Tip: Use keyboard arrows (← →) to switch days
+              </button>
+            )}
+            <div key={selectedDate} className="date-shift">
             <SectionLabel>Daily Goals</SectionLabel>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 24 }}>
               {DAILY_METRICS.map((m, i) => (
@@ -605,6 +810,7 @@ export default function App() {
                   <WeeklyCard metric={m} weekTotal={weekTotals[m.id]} todayValue={dayData[m.id] || 0} onIncrement={() => update(m.id, 1)} onDecrement={() => update(m.id, -1)} />
                 </div>
               ))}
+            </div>
             </div>
           </div>
         )}
