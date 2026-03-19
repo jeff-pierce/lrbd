@@ -127,7 +127,7 @@ function DailyCard({ metric, value, onIncrement, onDecrement }) {
       border: `1px solid ${done ? metric.color + "55" : "rgba(255,255,255,0.07)"}`,
       borderRadius: 20, padding: "20px 16px",
       display: "flex", flexDirection: "column", gap: 10,
-      position: "relative", overflow: "hidden", transition: "border-color 0.3s",
+      position: "relative", overflow: "hidden", transition: "border-color 0.3s", minWidth: 0,
     }}>
       {done && <div style={{
         position: "absolute", top: 0, left: 0, right: 0, height: 3,
@@ -184,7 +184,7 @@ function WeeklyCard({ metric, weekTotal, todayValue, onIncrement, onDecrement })
       border: `1px solid ${done ? metric.color + "55" : "rgba(255,255,255,0.07)"}`,
       borderRadius: 20, padding: "20px 16px",
       display: "flex", flexDirection: "column", gap: 10,
-      position: "relative", overflow: "hidden", transition: "border-color 0.3s",
+      position: "relative", overflow: "hidden", transition: "border-color 0.3s", minWidth: 0,
     }}>
       {done && <div style={{
         position: "absolute", top: 0, left: 0, right: 0, height: 3,
@@ -929,17 +929,17 @@ export default function App() {
             )}
             <div key={selectedDate} className="date-shift">
             <SectionLabel>Daily Goals</SectionLabel>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 24 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12, marginBottom: 24 }}>
               {DAILY_METRICS.map((m, i) => (
-                <div key={m.id} className="card-appear" style={{ animationDelay: `${i * 0.06}s`, animationFillMode: "both" }}>
+                <div key={m.id} className="card-appear" style={{ animationDelay: `${i * 0.06}s`, animationFillMode: "both", minWidth: 0 }}>
                   <DailyCard metric={m} value={dayData[m.id] || 0} onIncrement={() => update(m.id, 1)} onDecrement={() => update(m.id, -1)} />
                 </div>
               ))}
             </div>
             <SectionLabel>Weekly Goals</SectionLabel>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12, marginBottom: 16 }}>
               {WEEKLY_METRICS.map((m, i) => (
-                <div key={m.id} className="card-appear" style={{ animationDelay: `${(DAILY_METRICS.length + i) * 0.06}s`, animationFillMode: "both" }}>
+                <div key={m.id} className="card-appear" style={{ animationDelay: `${(DAILY_METRICS.length + i) * 0.06}s`, animationFillMode: "both", minWidth: 0 }}>
                   <WeeklyCard metric={m} weekTotal={weekTotals[m.id]} todayValue={dayData[m.id] || 0} onIncrement={() => update(m.id, 1)} onDecrement={() => update(m.id, -1)} />
                 </div>
               ))}
