@@ -14,7 +14,7 @@ const USER_ID = "d37bd602-65bb-4c95-b1fd-9a42ff87a6b3";
 // ── Metrics config ────────────────────────────────────────────
 const METRICS = [
   { id: "comments",    label: "LinkedIn Comments", icon: "💬", color: "#00C6A7", goal: 5,  cadence: "daily" },
-  { id: "followups",   label: "Follow-ups Sent",   icon: "📨", color: "#FF6B35", goal: 20, cadence: "daily" },
+  { id: "followups",   label: "Follow-ups Sent",   icon: "📨", color: "#FF6B35", goal: 15, cadence: "daily" },
   { id: "connections", label: "New Connections",   icon: "🤝", color: "#845EF7", goal: 15, cadence: "daily" },
   { id: "replies",     label: "Replies Received",  icon: "↩️", color: "#4DABF7", goal: 5,  cadence: "daily" },
   { id: "posts",       label: "Posts Published",   icon: "✍️", color: "#FFD43B", goal: 3,  cadence: "weekly" },
@@ -25,7 +25,16 @@ const DAILY_METRICS  = METRICS.filter(m => m.cadence === "daily");
 const WEEKLY_METRICS = METRICS.filter(m => m.cadence === "weekly");
 
 // ── Date helpers ──────────────────────────────────────────────
-const todayStr = () => new Date().toISOString().split("T")[0];
+const todayStr = () => {
+  const now = new Date();
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
+  return formatter.format(now);
+};
 
 const shiftDateByDays = (dateStr, days) => {
   const d = new Date(dateStr + "T00:00:00");
@@ -421,6 +430,129 @@ function WeekView({ allData }) {
   );
 }
 
+// ── History Graph ────────────────────────────────────────────
+function HistoryGraph({ allData }) {
+  if (Object.keys(allData).length === 0) {
+    return (
+      <div style={{ textAlign: "center", color: "rgba(255,255,255,0.25)", padding: "60px 0", fontSize: 14 }}>
+        No history yet — start tracking today!
+      </div>
+    );
+  }
+
+  const history = Object.entries(allData).sort(([a], [b]) => b.localeCompare(a)).slice(0, 14).reverse();
+  const width = 520;
+  const height = 320;
+  const padding = { top: 20, right: 20, bottom: 40, left: 50 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+
+  // Find min/max for each metric across history
+  const metricsMin = {};
+  const metricsMax = {};
+
+  DAILY_METRICS.forEach(m => {
+    const values = history.map(([_, data]) => data[m.id] || 0);
+    metricsMin[m.id] = Math.min(...values);
+    metricsMax[m.id] = Math.max(...values, m.goal);
+  });
+
+  const getY = (metricId, value) => {
+    const min = metricsMin[metricId];
+    const max = metricsMax[metricId];
+    const range = max - min || 1;
+    return padding.top + plotHeight - ((value - min) / range) * plotHeight;
+  };
+
+  const getX = (index) => padding.left + (index / (history.length - 1)) * plotWidth;
+
+  // Build SVG path for each metric
+  const paths = DAILY_METRICS.map(m => {
+    const points = history.map((_, i) => {
+      const x = getX(i);
+      const y = getY(m.id, history[i][1][m.id] || 0);
+      return `${x},${y}`;
+    });
+    return { metric: m, pathStr: `M ${points.join(" L ")}` };
+  });
+
+  return (
+    <div style={{ overflowX: "auto", width: "100%" }}>
+      <svg width={width} height={height} style={{ background: "rgba(255,255,255,0.01)", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
+        {/* Grid lines */}
+        {Array.from({ length: 5 }).map((_, i) => {
+          const y = padding.top + (i / 4) * plotHeight;
+          return <line key={`gridline-${i}`} x1={padding.left} y1={y} x2={width - padding.right} y2={y} stroke="rgba(255,255,255,0.03)" strokeWidth={1} />;
+        })}
+
+        {/* Y-axis */}
+        <line x1={padding.left} y1={padding.top} x2={padding.left} y2={height - padding.bottom} stroke="rgba(255,255,255,0.1)" strokeWidth={1} />
+
+        {/* X-axis */}
+        <line x1={padding.left} y1={height - padding.bottom} x2={width - padding.right} y2={height - padding.bottom} stroke="rgba(255,255,255,0.1)" strokeWidth={1} />
+
+        {/* Date labels on X-axis */}
+        {history.map((([dateStr], i) => {
+          if (i % Math.ceil(history.length / 4) !== 0) return null;
+          const x = getX(i);
+          const label = formatDate(dateStr);
+          return (
+            <g key={`date-${dateStr}`}>
+              <text x={x} y={height - padding.bottom + 20} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.35)" fontFamily="'DM Mono', monospace">
+                {label}
+              </text>
+            </g>
+          );
+        }))}
+
+        {/* Data lines for each metric */}
+        {paths.map(({ metric, pathStr }) => (
+          <path
+            key={metric.id}
+            d={pathStr}
+            fill="none"
+            stroke={metric.color}
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            opacity={0.8}
+          />
+        ))}
+
+        {/* Data points */}
+        {DAILY_METRICS.map(m => 
+          history.map((_, i) => {
+            const value = history[i][1][m.id] || 0;
+            const x = getX(i);
+            const y = getY(m.id, value);
+            const done = value >= m.goal;
+            return (
+              <circle
+                key={`point-${m.id}-${i}`}
+                cx={x}
+                cy={y}
+                r={done ? 4 : 2}
+                fill={m.color}
+                opacity={done ? 0.9 : 0.6}
+              />
+            );
+          })
+        )}
+      </svg>
+
+      {/* Legend */}
+      <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8 }}>
+        {DAILY_METRICS.map(m => (
+          <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "rgba(255,255,255,0.5)" }}>
+            <div style={{ width: 12, height: 2, background: m.color, borderRadius: 1 }} />
+            <span>{m.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Main App ──────────────────────────────────────────────────
 export default function App() {
   const [allData, setAllData]       = useState({});
@@ -428,6 +560,7 @@ export default function App() {
   const [tab, setTab]               = useState("today");
   const [syncStatus, setSyncStatus] = useState("loading");
   const [showKeyHint, setShowKeyHint] = useState(false);
+  const [historyView, setHistoryView] = useState("data");
   const pendingRef = useRef({});
   const debounceRef = useRef({});
 
@@ -535,7 +668,7 @@ export default function App() {
   const selectedWeekDays = getWeekDays(getMondayOf(selectedDate));
 
   return (
-    <div style={{ minHeight: "100vh", background: "#0A0A0F", fontFamily: "'Sora', sans-serif", color: "#fff", padding: "0 0 60px" }}>
+    <div style={{ minHeight: "100vh", background: "#0A0A0F", fontFamily: "'Sora', sans-serif", color: "#fff", padding: "0 0 60px", overflowX: "hidden" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700&family=DM+Mono:wght@400;500&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -821,23 +954,55 @@ export default function App() {
         {/* HISTORY TAB */}
         {tab === "history" && syncStatus !== "loading" && (
           <div className="card-appear">
-            {history.length === 0 ? (
-              <div style={{ textAlign: "center", color: "rgba(255,255,255,0.25)", padding: "60px 0", fontSize: 14 }}>No history yet — start tracking today!</div>
+            {/* View toggle */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 20, background: "rgba(255,255,255,0.02)", padding: 6, borderRadius: 10, border: "1px solid rgba(255,255,255,0.06)" }}>
+              <button 
+                onClick={() => setHistoryView("data")}
+                style={{
+                  flex: 1, padding: "8px 12px", borderRadius: 8, border: "none", cursor: "pointer",
+                  background: historyView === "data" ? "rgba(255,255,255,0.08)" : "transparent",
+                  color: historyView === "data" ? "#fff" : "rgba(255,255,255,0.4)",
+                  fontSize: 12, fontWeight: 600, fontFamily: "'Sora', sans-serif",
+                  transition: "all 0.2s", letterSpacing: "0.01em",
+                }}
+              >
+                📊 Data
+              </button>
+              <button 
+                onClick={() => setHistoryView("graph")}
+                style={{
+                  flex: 1, padding: "8px 12px", borderRadius: 8, border: "none", cursor: "pointer",
+                  background: historyView === "graph" ? "rgba(255,255,255,0.08)" : "transparent",
+                  color: historyView === "graph" ? "#fff" : "rgba(255,255,255,0.4)",
+                  fontSize: 12, fontWeight: 600, fontFamily: "'Sora', sans-serif",
+                  transition: "all 0.2s", letterSpacing: "0.01em",
+                }}
+              >
+                📈 Graph
+              </button>
+            </div>
+
+            {historyView === "data" ? (
+              history.length === 0 ? (
+                <div style={{ textAlign: "center", color: "rgba(255,255,255,0.25)", padding: "60px 0", fontSize: 14 }}>No history yet — start tracking today!</div>
+              ) : (
+                <>
+                  <div style={{
+                    display: "grid", gridTemplateColumns: "1fr repeat(6, 40px) 36px",
+                    gap: 4, padding: "0 14px 10px", fontSize: 10, color: "rgba(255,255,255,0.25)",
+                    fontFamily: "'DM Mono', monospace", textTransform: "uppercase", letterSpacing: "0.08em",
+                  }}>
+                    <div>Date</div>
+                    {METRICS.map(m => <div key={m.id} style={{ textAlign: "center" }}>{m.icon}</div>)}
+                    <div style={{ textAlign: "center" }}>✓</div>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    {history.map(([date, data]) => <HistoryRow key={date} dateStr={date} data={data} />)}
+                  </div>
+                </>
+              )
             ) : (
-              <>
-                <div style={{
-                  display: "grid", gridTemplateColumns: "1fr repeat(6, 40px) 36px",
-                  gap: 4, padding: "0 14px 10px", fontSize: 10, color: "rgba(255,255,255,0.25)",
-                  fontFamily: "'DM Mono', monospace", textTransform: "uppercase", letterSpacing: "0.08em",
-                }}>
-                  <div>Date</div>
-                  {METRICS.map(m => <div key={m.id} style={{ textAlign: "center" }}>{m.icon}</div>)}
-                  <div style={{ textAlign: "center" }}>✓</div>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  {history.map(([date, data]) => <HistoryRow key={date} dateStr={date} data={data} />)}
-                </div>
-              </>
+              <HistoryGraph allData={allData} />
             )}
           </div>
         )}
