@@ -7,9 +7,77 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
-// ── User ID: hardcoded permanent ID, same across all devices ──
+// ── Auth ──────────────────────────────────────────────────────
 
-const USER_ID = "d37bd602-65bb-4c95-b1fd-9a42ff87a6b3";
+function AuthCard({
+  email,
+  setEmail,
+  authMessage,
+  isSending,
+  onSendLink,
+}) {
+  return (
+    <div style={{ minHeight: "100vh", background: "#0A0A0F", fontFamily: "'Sora', sans-serif", color: "#fff", display: "grid", placeItems: "center", padding: 20 }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700&family=DM+Mono:wght@400;500&display=swap');
+        * { box-sizing: border-box; }
+      `}</style>
+      <div style={{ width: "100%", maxWidth: 430, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 18, padding: 24 }}>
+        <div style={{ fontSize: 11, letterSpacing: "0.16em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", fontFamily: "'DM Mono', monospace", marginBottom: 6 }}>
+          LRBD Tracker
+        </div>
+        <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.02em", margin: "0 0 10px" }}>Secure Sign In</h1>
+        <p style={{ color: "rgba(255,255,255,0.55)", fontSize: 14, lineHeight: 1.6, margin: "0 0 18px" }}>
+          Enter your email and we will send a magic link. No password needed.
+        </p>
+        <form
+          onSubmit={onSendLink}
+          style={{ display: "flex", flexDirection: "column", gap: 10 }}
+        >
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@domain.com"
+            required
+            style={{
+              width: "100%",
+              borderRadius: 10,
+              border: "1px solid rgba(255,255,255,0.15)",
+              background: "rgba(255,255,255,0.03)",
+              color: "#fff",
+              padding: "11px 12px",
+              fontSize: 14,
+              outline: "none",
+            }}
+          />
+          <button
+            type="submit"
+            disabled={isSending}
+            style={{
+              border: "1px solid rgba(0,198,167,0.45)",
+              background: "rgba(0,198,167,0.15)",
+              color: "#00C6A7",
+              borderRadius: 10,
+              padding: "10px 12px",
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: isSending ? "default" : "pointer",
+              opacity: isSending ? 0.6 : 1,
+            }}
+          >
+            {isSending ? "Sending..." : "Send Magic Link"}
+          </button>
+        </form>
+        {authMessage && (
+          <div style={{ marginTop: 12, fontSize: 12, color: "rgba(255,255,255,0.65)", lineHeight: 1.5 }}>
+            {authMessage}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ── Metrics config ────────────────────────────────────────────
 const METRICS = [
@@ -42,6 +110,22 @@ const shiftDateByDays = (dateStr, days) => {
   return d.toISOString().split("T")[0];
 };
 
+const prevWorkDay = (dateStr) => {
+  let d = shiftDateByDays(dateStr, -1);
+  const day = new Date(d + "T00:00:00").getDay();
+  if (day === 0) d = shiftDateByDays(d, -2); // Sun → Fri
+  if (day === 6) d = shiftDateByDays(d, -1); // Sat → Fri
+  return d;
+};
+
+const nextWorkDay = (dateStr) => {
+  let d = shiftDateByDays(dateStr, 1);
+  const day = new Date(d + "T00:00:00").getDay();
+  if (day === 6) d = shiftDateByDays(d, 2); // Sat → Mon
+  if (day === 0) d = shiftDateByDays(d, 1); // Sun → Mon
+  return d;
+};
+
 const isYesterday = (dateStr) => dateStr === shiftDateByDays(todayStr(), -1);
 const isFutureDate = (dateStr) => dateStr > todayStr();
 const KEY_HINT_STORAGE_KEY = "lrbd_seen_arrow_key_hint";
@@ -49,6 +133,14 @@ const KEY_HINT_STORAGE_KEY = "lrbd_seen_arrow_key_hint";
 const formatDate = (dateStr) => {
   const d = new Date(dateStr + "T00:00:00");
   return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+};
+
+const formatWeekRange = (mondayStr) => {
+  const mon = new Date(mondayStr + "T00:00:00");
+  const fri = new Date(mondayStr + "T00:00:00");
+  fri.setDate(fri.getDate() + 4);
+  const opts = { month: "short", day: "numeric" };
+  return `${mon.toLocaleDateString("en-US", opts)} - ${fri.toLocaleDateString("en-US", opts)}`;
 };
 
 function getMondayOf(dateStr) {
@@ -74,11 +166,11 @@ function workDayIndex(dateStr) {
 
 // ── Supabase data helpers ─────────────────────────────────────
 // Load all rows for this user and reshape into { date: { metricId: value } }
-async function fetchAllData() {
+async function fetchAllData(userId) {
   const { data, error } = await supabase
     .from("metrics")
     .select("date, metric_id, value")
-    .eq("user_id", USER_ID);
+    .eq("user_id", userId);
 
   if (error) throw error;
 
@@ -91,12 +183,36 @@ async function fetchAllData() {
 }
 
 // Upsert a single metric value
-async function upsertMetric(date, metricId, value) {
+async function upsertMetric(userId, date, metricId, value) {
   const { error } = await supabase
     .from("metrics")
     .upsert(
-      { user_id: USER_ID, date, metric_id: metricId, value, updated_at: new Date().toISOString() },
+      { user_id: userId, date, metric_id: metricId, value, updated_at: new Date().toISOString() },
       { onConflict: "user_id,date,metric_id" }
+    );
+  if (error) throw error;
+}
+
+// ── Reflections helpers ───────────────────────────────────────
+async function fetchAllReflections(userId) {
+  const { data, error } = await supabase
+    .from("reflections")
+    .select("date, wins, learnings")
+    .eq("user_id", userId);
+  if (error) throw error;
+  const shaped = {};
+  for (const row of data) {
+    shaped[row.date] = { wins: row.wins || "", learnings: row.learnings || "" };
+  }
+  return shaped;
+}
+
+async function upsertReflection(userId, date, wins, learnings) {
+  const { error } = await supabase
+    .from("reflections")
+    .upsert(
+      { user_id: userId, date, wins, learnings, updated_at: new Date().toISOString() },
+      { onConflict: "user_id,date" }
     );
   if (error) throw error;
 }
@@ -292,11 +408,13 @@ function HistoryRow({ dateStr, data }) {
 }
 
 // ── This Week view ────────────────────────────────────────────
-function WeekView({ allData }) {
-  const monday = getMondayOf(todayStr());
+function WeekView({ allData, weekMonday, onPrevWeek, onNextWeek, onGoToCurrentWeek }) {
+  const monday = weekMonday;
   const weekDays = getWeekDays(monday);
   const todayDate = todayStr();
-  const daysElapsed = Math.max(1, Math.min(workDayIndex(todayDate), 5));
+  const todayMonday = getMondayOf(todayDate);
+  const isCurrentWeek = monday === todayMonday;
+  const daysElapsed = isCurrentWeek ? Math.max(1, Math.min(workDayIndex(todayDate), 5)) : 5;
   const daysRemaining = Math.max(0, 5 - daysElapsed);
 
   const weekTotals = {};
@@ -325,11 +443,7 @@ function WeekView({ allData }) {
 
   const projected = (m) => Math.round((weekTotals[m.id] / daysElapsed) * 5);
 
-  const mon = new Date(monday + "T00:00:00");
-  const fri = new Date(monday + "T00:00:00");
-  fri.setDate(fri.getDate() + 4);
-  const opts = { month: "short", day: "numeric" };
-  const weekLabel = `${mon.toLocaleDateString("en-US", opts)} – ${fri.toLocaleDateString("en-US", opts)}`;
+  const weekLabel = formatWeekRange(monday);
   const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri"];
   const onTrackCount = METRICS.filter(m => pace(m) === "done" || pace(m) === "on-track").length;
 
@@ -400,17 +514,92 @@ function WeekView({ allData }) {
 
   return (
     <div className="card-appear">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-        <div>
-          <div style={{ fontSize: 11, letterSpacing: "0.15em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", fontFamily: "'DM Mono', monospace", marginBottom: 4 }}>Current Week</div>
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "44px 1fr 44px",
+        alignItems: "center",
+        gap: 10,
+        marginBottom: 12,
+      }}>
+        <button
+          onClick={onPrevWeek}
+          aria-label="Previous week"
+          title="Previous week"
+          style={{
+            width: 44,
+            height: 36,
+            borderRadius: 10,
+            border: "1px solid rgba(255,255,255,0.1)",
+            background: "rgba(255,255,255,0.05)",
+            color: "rgba(255,255,255,0.7)",
+            fontSize: 18,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          ←
+        </button>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 11, letterSpacing: "0.15em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", fontFamily: "'DM Mono', monospace", marginBottom: 4 }}>
+            {isCurrentWeek ? "Current Week" : "Viewing Past Week"}
+          </div>
           <div style={{ fontSize: 15, fontWeight: 600 }}>{weekLabel}</div>
         </div>
-        <div style={{ textAlign: "right" }}>
-          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 13, color: "rgba(255,255,255,0.4)" }}>
-            Day <span style={{ color: "#fff", fontWeight: 700 }}>{daysElapsed}</span> of 5
-          </div>
-          {daysRemaining > 0 && <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: "rgba(255,255,255,0.25)", marginTop: 2 }}>{daysRemaining}d left</div>}
+        <button
+          onClick={onNextWeek}
+          disabled={isCurrentWeek}
+          aria-label={isCurrentWeek ? "Already on current week" : "Next week"}
+          title={isCurrentWeek ? "Already on current week" : "Next week"}
+          style={{
+            width: 44,
+            height: 36,
+            borderRadius: 10,
+            border: "1px solid rgba(255,255,255,0.1)",
+            background: "rgba(255,255,255,0.05)",
+            color: "rgba(255,255,255,0.7)",
+            fontSize: 18,
+            cursor: isCurrentWeek ? "not-allowed" : "pointer",
+            opacity: isCurrentWeek ? 0.4 : 1,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          →
+        </button>
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 13, color: "rgba(255,255,255,0.4)" }}>
+          Day <span style={{ color: "#fff", fontWeight: 700 }}>{daysElapsed}</span> of 5
         </div>
+        {!isCurrentWeek ? (
+          <button
+            onClick={onGoToCurrentWeek}
+            aria-label="Jump to current week"
+            title="Jump to current week"
+            style={{
+              borderRadius: 10,
+              border: "1px solid rgba(255,255,255,0.12)",
+              background: "rgba(255,255,255,0.05)",
+              color: "rgba(255,255,255,0.75)",
+              fontFamily: "'DM Mono', monospace",
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              cursor: "pointer",
+              padding: "8px 10px",
+            }}
+          >
+            This Week
+          </button>
+        ) : (
+          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: "rgba(255,255,255,0.25)", marginTop: 2 }}>
+            {daysRemaining}d left
+          </div>
+        )}
       </div>
       <SectionLabel>Daily Goals · Week Totals</SectionLabel>
       <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
@@ -557,28 +746,118 @@ function HistoryGraph({ allData }) {
 export default function App() {
   const [allData, setAllData]       = useState({});
   const [selectedDate, setSelectedDate] = useState(todayStr());
+  const [weekMonday, setWeekMonday] = useState(() => getMondayOf(todayStr()));
+  const [weekNavDirection, setWeekNavDirection] = useState("right");
+  const [weekNavInput, setWeekNavInput] = useState("button");
   const [tab, setTab]               = useState("today");
   const [syncStatus, setSyncStatus] = useState("loading");
   const [showKeyHint, setShowKeyHint] = useState(false);
   const [historyView, setHistoryView] = useState("data");
+  const [allReflections, setAllReflections] = useState({});
+  const [authReady, setAuthReady] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authMessage, setAuthMessage] = useState("");
+  const [isSendingAuthLink, setIsSendingAuthLink] = useState(false);
   const pendingRef = useRef({});
   const debounceRef = useRef({});
+  const reflectionPendingRef = useRef({});
+  const reflectionDebounceRef = useRef({});
+  const currentWeekMonday = getMondayOf(todayStr());
 
-  const loadData = useCallback(async (isInitialLoad = false) => {
+  const goPrevWeek = useCallback((source = "button") => {
+    setWeekNavInput(source);
+    setWeekNavDirection("left");
+    setWeekMonday(prev => shiftDateByDays(prev, -7));
+  }, []);
+
+  const goNextWeek = useCallback((source = "button") => {
+    setWeekNavInput(source);
+    setWeekNavDirection("right");
+    setWeekMonday(prev => {
+      const next = shiftDateByDays(prev, 7);
+      return next > currentWeekMonday ? currentWeekMonday : next;
+    });
+  }, [currentWeekMonday]);
+
+  const goToCurrentWeek = useCallback((source = "button") => {
+    if (weekMonday === currentWeekMonday) return;
+    setWeekNavInput(source);
+    setWeekNavDirection("right");
+    setWeekMonday(currentWeekMonday);
+  }, [weekMonday, currentWeekMonday]);
+
+  const loadData = useCallback(async (userId, isInitialLoad = false) => {
+    if (!userId) return;
     setSyncStatus(isInitialLoad ? "loading" : "syncing");
     try {
-      const data = await fetchAllData();
+      const [data, reflections] = await Promise.all([fetchAllData(userId), fetchAllReflections(userId)]);
       setAllData(data);
+      setAllReflections(reflections);
       setSyncStatus("synced");
     } catch {
       setSyncStatus("error");
     }
   }, []);
 
-  // Load all data from Supabase on mount
+  // Bootstrap auth session and keep user state in sync.
   useEffect(() => {
-    loadData(true);
-  }, [loadData]);
+    let isMounted = true;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!isMounted) return;
+      setCurrentUser(data.session?.user ?? null);
+      setAuthReady(true);
+    });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setCurrentUser(session?.user ?? null);
+      setAuthReady(true);
+    });
+
+    return () => {
+      isMounted = false;
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!authReady) return;
+    if (!currentUser?.id) {
+      setAllData({});
+      setAllReflections({});
+      setSyncStatus("synced");
+      return;
+    }
+    loadData(currentUser.id, true);
+  }, [authReady, currentUser, loadData]);
+
+  const sendMagicLink = useCallback(async (e) => {
+    e.preventDefault();
+    if (!authEmail.trim()) return;
+    setIsSendingAuthLink(true);
+    setAuthMessage("");
+    const { error } = await supabase.auth.signInWithOtp({
+      email: authEmail.trim(),
+      options: {
+        shouldCreateUser: true,
+        emailRedirectTo: window.location.origin,
+      },
+    });
+    if (error) {
+      setAuthMessage(`Could not send magic link: ${error.message}`);
+    } else {
+      setAuthMessage("Magic link sent. Open your email and click the link to sign in.");
+    }
+    setIsSendingAuthLink(false);
+  }, [authEmail]);
+
+  const signOut = useCallback(async () => {
+    await supabase.auth.signOut();
+    setTab("today");
+    setSelectedDate(todayStr());
+    setWeekMonday(getMondayOf(todayStr()));
+  }, []);
 
   const dismissKeyHint = useCallback(() => {
     setShowKeyHint(false);
@@ -601,28 +880,72 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (e) => {
-      if (tab !== "today") return;
+      if (tab !== "today" && tab !== "week") return;
       const target = e.target;
       const tag = target?.tagName?.toLowerCase();
       const isTypingContext = tag === "input" || tag === "textarea" || tag === "select" || target?.isContentEditable;
       if (isTypingContext) return;
 
-      if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        dismissKeyHint();
-        setSelectedDate(prev => shiftDateByDays(prev, -1));
+      if (tab === "today") {
+        if (e.key === "ArrowLeft") {
+          e.preventDefault();
+          dismissKeyHint();
+          setSelectedDate(prev => prevWorkDay(prev));
+        }
+
+        if (e.key === "ArrowRight" && selectedDate !== todayStr()) {
+          e.preventDefault();
+          dismissKeyHint();
+          setSelectedDate(prev => {
+            const next = nextWorkDay(prev);
+            return next > todayStr() ? todayStr() : next;
+          });
+        }
       }
 
-      if (e.key === "ArrowRight" && selectedDate !== todayStr()) {
-        e.preventDefault();
-        dismissKeyHint();
-        setSelectedDate(prev => shiftDateByDays(prev, 1));
+      if (tab === "week") {
+        if (e.key === "ArrowLeft") {
+          e.preventDefault();
+          goPrevWeek("keyboard");
+        }
+
+        if (e.key === "ArrowRight") {
+          e.preventDefault();
+          goNextWeek("keyboard");
+        }
       }
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [tab, selectedDate, dismissKeyHint]);
+  }, [tab, selectedDate, dismissKeyHint, goPrevWeek, goNextWeek]);
+
+  // Debounced reflection save — waits 1200ms after last keystroke
+  const scheduleReflectionUpsert = useCallback((date, wins, learnings) => {
+    reflectionPendingRef.current[date] = { wins, learnings };
+    clearTimeout(reflectionDebounceRef.current[date]);
+    setSyncStatus("syncing");
+    reflectionDebounceRef.current[date] = setTimeout(async () => {
+      const { wins: w, learnings: l } = reflectionPendingRef.current[date];
+      if (!currentUser?.id) return;
+      try {
+        await upsertReflection(currentUser.id, date, w, l);
+        setSyncStatus("synced");
+      } catch {
+        setSyncStatus("error");
+      }
+    }, 1200);
+  }, [currentUser]);
+
+  const updateReflection = useCallback((date, field, value) => {
+    setAllReflections(prev => {
+      const current = prev[date] || { wins: "", learnings: "" };
+      const updated = { ...prev, [date]: { ...current, [field]: value } };
+      const entry = updated[date];
+      scheduleReflectionUpsert(date, entry.wins, entry.learnings);
+      return updated;
+    });
+  }, [scheduleReflectionUpsert]);
 
   // Debounced upsert — waits 800ms after last tap before writing to Supabase
   const scheduleUpsert = useCallback((date, metricId, value) => {
@@ -632,14 +955,15 @@ export default function App() {
     setSyncStatus("syncing");
     debounceRef.current[key] = setTimeout(async () => {
       const { date: d, metricId: mid, value: v } = pendingRef.current[key];
+      if (!currentUser?.id) return;
       try {
-        await upsertMetric(d, mid, v);
+        await upsertMetric(currentUser.id, d, mid, v);
         setSyncStatus("synced");
       } catch {
         setSyncStatus("error");
       }
     }, 800);
-  }, []);
+  }, [currentUser]);
 
   const update = useCallback((metricId, delta) => {
     setAllData(prev => {
@@ -666,6 +990,27 @@ export default function App() {
   const dailyGoalsHit = DAILY_METRICS.filter(m => (dayData[m.id] || 0) >= m.goal).length;
   const history = Object.entries(allData).sort(([a], [b]) => b.localeCompare(a)).slice(0, 14);
   const selectedWeekDays = getWeekDays(getMondayOf(selectedDate));
+  const weekTitle = weekMonday === currentWeekMonday ? "This Week" : `Week of ${formatWeekRange(weekMonday)}`;
+
+  if (!authReady) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#0A0A0F", display: "grid", placeItems: "center", color: "rgba(255,255,255,0.6)", fontFamily: "'DM Mono', monospace" }}>
+        Checking session...
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return (
+      <AuthCard
+        email={authEmail}
+        setEmail={setAuthEmail}
+        authMessage={authMessage}
+        isSending={isSendingAuthLink}
+        onSendLink={sendMagicLink}
+      />
+    );
+  }
 
   return (
     <div style={{ minHeight: "100vh", background: "#0A0A0F", fontFamily: "'Sora', sans-serif", color: "#fff", padding: "0 0 60px", overflowX: "hidden" }}>
@@ -677,8 +1022,19 @@ export default function App() {
         @keyframes pulse { 0%,100%{opacity:.5} 50%{opacity:1} }
         @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
         @keyframes dateShiftIn { from{opacity:0;transform:translateX(8px) translateY(2px)} to{opacity:1;transform:translateX(0) translateY(0)} }
+        @keyframes weekShiftInFromLeft { from{opacity:0;transform:translateX(-18px)} to{opacity:1;transform:translateX(0)} }
+        @keyframes weekShiftInFromRight { from{opacity:0;transform:translateX(18px)} to{opacity:1;transform:translateX(0)} }
         .card-appear { animation: fadeIn 0.3s ease forwards; }
         .date-shift { animation: dateShiftIn 0.24s cubic-bezier(0.2,0.8,0.2,1); }
+        .week-shift-left { animation: weekShiftInFromLeft 0.22s cubic-bezier(0.2,0.8,0.2,1); }
+        .week-shift-right { animation: weekShiftInFromRight 0.22s cubic-bezier(0.2,0.8,0.2,1); }
+        .week-shift-left-keyboard { animation: weekShiftInFromLeft 0.2s cubic-bezier(0.16,1,0.3,1); }
+        .week-shift-right-keyboard { animation: weekShiftInFromRight 0.2s cubic-bezier(0.16,1,0.3,1); }
+        @media (prefers-reduced-motion: reduce) {
+          .card-appear, .date-shift, .week-shift-left, .week-shift-right, .week-shift-left-keyboard, .week-shift-right-keyboard {
+            animation: none !important;
+          }
+        }
         button:active { transform: scale(0.95); }
       `}</style>
 
@@ -690,7 +1046,26 @@ export default function App() {
               <div style={{ fontSize: 11, letterSpacing: "0.2em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", fontFamily: "'DM Mono', monospace" }}>LRBD Tracker</div>
               <SyncDot status={syncStatus} />
               <button
-                onClick={() => loadData(false)}
+                onClick={signOut}
+                aria-label="Sign out"
+                title="Sign out"
+                style={{
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  background: "rgba(255,255,255,0.04)",
+                  color: "rgba(255,255,255,0.6)",
+                  borderRadius: 7,
+                  padding: "2px 8px",
+                  fontSize: 10,
+                  fontFamily: "'DM Mono', monospace",
+                  letterSpacing: "0.04em",
+                  textTransform: "uppercase",
+                  cursor: "pointer",
+                }}
+              >
+                Sign out
+              </button>
+              <button
+                onClick={() => loadData(currentUser.id, false)}
                 disabled={syncStatus === "loading" || syncStatus === "syncing"}
                 aria-label="Refresh data"
                 title="Refresh data"
@@ -725,7 +1100,7 @@ export default function App() {
               </button>
             </div>
             <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.02em" }}>
-              {tab === "week" ? "This Week" : tab === "history" ? "History" : selectedDate === todayStr() ? "Today" : formatDate(selectedDate)}
+              {tab === "week" ? weekTitle : tab === "history" ? "History" : selectedDate === todayStr() ? "Today" : formatDate(selectedDate)}
             </h1>
           </div>
           {tab === "today" && (
@@ -775,7 +1150,7 @@ export default function App() {
               marginBottom: 20,
             }}>
               <button
-                onClick={() => setSelectedDate(prev => shiftDateByDays(prev, -1))}
+                onClick={() => setSelectedDate(prev => prevWorkDay(prev))}
                 aria-label="Previous day"
                 title="Previous day"
                 style={{
@@ -806,7 +1181,7 @@ export default function App() {
               </div>
               {selectedDate === todayStr() ? (
                 <div />
-              ) : isYesterday(selectedDate) ? (
+              ) : nextWorkDay(selectedDate) >= todayStr() ? (
                 <button
                   onClick={() => setSelectedDate(todayStr())}
                   aria-label="Go to today"
@@ -830,7 +1205,10 @@ export default function App() {
                 </button>
               ) : (
                 <button
-                  onClick={() => setSelectedDate(prev => shiftDateByDays(prev, 1))}
+                  onClick={() => setSelectedDate(prev => {
+                    const next = nextWorkDay(prev);
+                    return next > todayStr() ? todayStr() : next;
+                  })}
                   aria-label="Next day"
                   title="Next day"
                   style={{
@@ -937,19 +1315,81 @@ export default function App() {
               ))}
             </div>
             <SectionLabel>Weekly Goals</SectionLabel>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12, marginBottom: 16 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12, marginBottom: 24 }}>
               {WEEKLY_METRICS.map((m, i) => (
                 <div key={m.id} className="card-appear" style={{ animationDelay: `${(DAILY_METRICS.length + i) * 0.06}s`, animationFillMode: "both", minWidth: 0 }}>
                   <WeeklyCard metric={m} weekTotal={weekTotals[m.id]} todayValue={dayData[m.id] || 0} onIncrement={() => update(m.id, 1)} onDecrement={() => update(m.id, -1)} />
                 </div>
               ))}
             </div>
+            <SectionLabel>Wins &amp; Learnings</SectionLabel>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
+              <div style={{
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.07)",
+                borderRadius: 16,
+                padding: "14px 16px",
+              }}>
+                <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", fontFamily: "'DM Mono', monospace", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 8 }}>
+                  🏆 Wins
+                </div>
+                <textarea
+                  value={allReflections[selectedDate]?.wins || ""}
+                  onChange={e => updateReflection(selectedDate, "wins", e.target.value)}
+                  placeholder="What went well today?"
+                  rows={3}
+                  style={{
+                    width: "100%", background: "transparent", border: "none", outline: "none",
+                    color: "rgba(255,255,255,0.8)", fontSize: 13, fontFamily: "'Sora', sans-serif",
+                    resize: "vertical", lineHeight: 1.65, letterSpacing: "0.01em",
+                  }}
+                />
+              </div>
+              <div style={{
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.07)",
+                borderRadius: 16,
+                padding: "14px 16px",
+              }}>
+                <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", fontFamily: "'DM Mono', monospace", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 8 }}>
+                  💡 Learnings
+                </div>
+                <textarea
+                  value={allReflections[selectedDate]?.learnings || ""}
+                  onChange={e => updateReflection(selectedDate, "learnings", e.target.value)}
+                  placeholder="What did you learn or want to remember?"
+                  rows={3}
+                  style={{
+                    width: "100%", background: "transparent", border: "none", outline: "none",
+                    color: "rgba(255,255,255,0.8)", fontSize: 13, fontFamily: "'Sora', sans-serif",
+                    resize: "vertical", lineHeight: 1.65, letterSpacing: "0.01em",
+                  }}
+                />
+              </div>
+            </div>
             </div>
           </div>
         )}
 
         {/* THIS WEEK TAB */}
-        {tab === "week" && syncStatus !== "loading" && <WeekView allData={allData} />}
+        {tab === "week" && syncStatus !== "loading" && (
+          <div
+            key={weekMonday}
+            className={
+              weekNavDirection === "left"
+                ? weekNavInput === "keyboard" ? "week-shift-left-keyboard" : "week-shift-left"
+                : weekNavInput === "keyboard" ? "week-shift-right-keyboard" : "week-shift-right"
+            }
+          >
+            <WeekView
+              allData={allData}
+              weekMonday={weekMonday}
+              onPrevWeek={goPrevWeek}
+              onNextWeek={goNextWeek}
+              onGoToCurrentWeek={goToCurrentWeek}
+            />
+          </div>
+        )}
 
         {/* HISTORY TAB */}
         {tab === "history" && syncStatus !== "loading" && (
