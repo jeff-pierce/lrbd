@@ -988,47 +988,57 @@ export default function App() {
       const direct = tryExtractUrl(raw);
       if (!direct) throw new Error("Invalid URL");
 
-      // Some email clients wrap links inside query params like url= or redirect=.
-      const wrapped =
-        direct.searchParams.get("url") ||
-        direct.searchParams.get("redirect") ||
-        direct.searchParams.get("redirect_to") ||
-        direct.searchParams.get("redirectUrl");
-      const url = wrapped ? (tryExtractUrl(decodeURIComponent(wrapped)) || direct) : direct;
+      const getAuthBits = (candidate) => {
+        const tokenHashValue = candidate.searchParams.get("token_hash");
+        const tokenValue = candidate.searchParams.get("token");
+        const typeValue = candidate.searchParams.get("type") || "magiclink";
+        const hashParams = new URLSearchParams(candidate.hash?.startsWith("#") ? candidate.hash.slice(1) : "");
+        const accessTokenValue = hashParams.get("access_token");
+        const refreshTokenValue = hashParams.get("refresh_token");
+        return { tokenHashValue, tokenValue, typeValue, accessTokenValue, refreshTokenValue };
+      };
 
-      const tokenHash = url.searchParams.get("token_hash");
-      const token = url.searchParams.get("token");
-      const type = url.searchParams.get("type") || "magiclink";
+      // Always trust direct URL tokens first.
+      let { tokenHashValue, tokenValue, typeValue, accessTokenValue, refreshTokenValue } = getAuthBits(direct);
+
+      // Some email clients wrap links inside query params like url= or redirect=.
+      // Only inspect wrapped URL if the direct URL did not include auth tokens.
+      if (!tokenHashValue && !tokenValue && !accessTokenValue) {
+        const wrapped =
+          direct.searchParams.get("url") ||
+          direct.searchParams.get("redirect") ||
+          direct.searchParams.get("redirect_to") ||
+          direct.searchParams.get("redirectUrl");
+        if (wrapped) {
+          const unwrapped = tryExtractUrl(decodeURIComponent(wrapped));
+          if (unwrapped) {
+            ({ tokenHashValue, tokenValue, typeValue, accessTokenValue, refreshTokenValue } = getAuthBits(unwrapped));
+          }
+        }
+      }
 
       let error = null;
 
-      if (tokenHash) {
+      if (tokenHashValue) {
         const result = await supabase.auth.verifyOtp({
-          token_hash: tokenHash,
-          type,
+          token_hash: tokenHashValue,
+          type: typeValue,
         });
         error = result.error;
-      } else if (token) {
+      } else if (tokenValue) {
         const result = await supabase.auth.verifyOtp({
-          email: authEmail.trim(),
-          token,
-          type: "email",
+          token_hash: tokenValue,
+          type: typeValue,
         });
         error = result.error;
       } else {
-        // Some Supabase magic links carry tokens in the URL fragment (#access_token=...)
-        // instead of query params. Support both formats for PWA copy/paste login.
-        const hashParams = new URLSearchParams(url.hash?.startsWith("#") ? url.hash.slice(1) : "");
-        const accessToken = hashParams.get("access_token");
-        const refreshToken = hashParams.get("refresh_token");
-
-        if (!accessToken || !refreshToken) {
+        if (!accessTokenValue || !refreshTokenValue) {
           throw new Error("Link missing token_hash or access_token/refresh_token");
         }
 
         const result = await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken,
+          access_token: accessTokenValue,
+          refresh_token: refreshTokenValue,
         });
         error = result.error;
       }
