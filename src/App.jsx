@@ -12,9 +12,14 @@ const supabase = createClient(
 function AuthCard({
   email,
   setEmail,
+  code,
+  setCode,
+  hasSentCode,
   authMessage,
   isSending,
+  isVerifying,
   onSendLink,
+  onVerifyCode,
 }) {
   return (
     <div style={{ minHeight: "100vh", background: "#0A0A0F", fontFamily: "'Sora', sans-serif", color: "#fff", display: "grid", placeItems: "center", padding: 20 }}>
@@ -28,7 +33,7 @@ function AuthCard({
         </div>
         <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.02em", margin: "0 0 10px" }}>Secure Sign In</h1>
         <p style={{ color: "rgba(255,255,255,0.55)", fontSize: 14, lineHeight: 1.6, margin: "0 0 18px" }}>
-          Enter your email and we will send a magic link. No password needed.
+          Enter your email for a sign-in link and a 6-digit code. Use the code directly in this screen if iPhone opens the link in the wrong app.
         </p>
         <form
           onSubmit={onSendLink}
@@ -66,9 +71,53 @@ function AuthCard({
               opacity: isSending ? 0.6 : 1,
             }}
           >
-            {isSending ? "Sending..." : "Send Magic Link"}
+            {isSending ? "Sending..." : hasSentCode ? "Resend Code" : "Send Sign-In Code"}
           </button>
         </form>
+        {hasSentCode && (
+          <form
+            onSubmit={onVerifyCode}
+            style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}
+          >
+            <input
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              placeholder="Enter 6-digit code"
+              required
+              style={{
+                width: "100%",
+                borderRadius: 10,
+                border: "1px solid rgba(255,255,255,0.15)",
+                background: "rgba(255,255,255,0.03)",
+                color: "#fff",
+                padding: "11px 12px",
+                fontSize: 14,
+                letterSpacing: "0.2em",
+                outline: "none",
+              }}
+            />
+            <button
+              type="submit"
+              disabled={isVerifying || code.length !== 6}
+              style={{
+                border: "1px solid rgba(132,94,247,0.45)",
+                background: "rgba(132,94,247,0.2)",
+                color: "#D5C5FF",
+                borderRadius: 10,
+                padding: "10px 12px",
+                fontSize: 13,
+                fontWeight: 700,
+                cursor: isVerifying ? "default" : "pointer",
+                opacity: isVerifying || code.length !== 6 ? 0.6 : 1,
+              }}
+            >
+              {isVerifying ? "Verifying..." : "Verify Code"}
+            </button>
+          </form>
+        )}
         {authMessage && (
           <div style={{ marginTop: 12, fontSize: 12, color: "rgba(255,255,255,0.65)", lineHeight: 1.5 }}>
             {authMessage}
@@ -757,8 +806,11 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [authEmail, setAuthEmail] = useState("");
+  const [authCode, setAuthCode] = useState("");
+  const [hasSentAuthCode, setHasSentAuthCode] = useState(false);
   const [authMessage, setAuthMessage] = useState("");
   const [isSendingAuthLink, setIsSendingAuthLink] = useState(false);
+  const [isVerifyingAuthCode, setIsVerifyingAuthCode] = useState(false);
   const pendingRef = useRef({});
   const debounceRef = useRef({});
   const reflectionPendingRef = useRef({});
@@ -845,12 +897,34 @@ export default function App() {
       },
     });
     if (error) {
-      setAuthMessage(`Could not send magic link: ${error.message}`);
+      setAuthMessage(`Could not send sign-in code: ${error.message}`);
     } else {
-      setAuthMessage("Magic link sent. Open your email and click the link to sign in.");
+      setHasSentAuthCode(true);
+      setAuthMessage("Check your email for a magic link and a 6-digit code. If the link opens in the wrong app, enter the code here.");
     }
     setIsSendingAuthLink(false);
   }, [authEmail]);
+
+  const verifyEmailCode = useCallback(async (e) => {
+    e.preventDefault();
+    if (!authEmail.trim() || authCode.length !== 6) return;
+    setIsVerifyingAuthCode(true);
+    setAuthMessage("");
+
+    const { error } = await supabase.auth.verifyOtp({
+      email: authEmail.trim(),
+      token: authCode,
+      type: "email",
+    });
+
+    if (error) {
+      setAuthMessage(`Could not verify code: ${error.message}`);
+    } else {
+      setAuthMessage("Code verified. Signing you in...");
+      setAuthCode("");
+    }
+    setIsVerifyingAuthCode(false);
+  }, [authEmail, authCode]);
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
@@ -1004,10 +1078,20 @@ export default function App() {
     return (
       <AuthCard
         email={authEmail}
-        setEmail={setAuthEmail}
+        setEmail={(value) => {
+          setAuthEmail(value);
+          setAuthCode("");
+          setHasSentAuthCode(false);
+          setAuthMessage("");
+        }}
+        code={authCode}
+        setCode={setAuthCode}
+        hasSentCode={hasSentAuthCode}
         authMessage={authMessage}
         isSending={isSendingAuthLink}
+        isVerifying={isVerifyingAuthCode}
         onSendLink={sendMagicLink}
+        onVerifyCode={verifyEmailCode}
       />
     );
   }
