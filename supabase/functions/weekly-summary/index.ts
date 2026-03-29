@@ -44,16 +44,17 @@ Deno.serve(async (req) => {
       throw new Error("Missing SUMMARY_USER_EMAIL (or RECIPIENT_EMAIL fallback) secret");
     }
 
-    const { data: authUser, error: authUserError } = await supabase
-      .schema("auth")
-      .from("users")
-      .select("id")
-      .eq("email", summaryUserEmail)
-      .maybeSingle();
+    const { data: usersPage, error: usersError } = await supabase.auth.admin.listUsers({
+      page: 1,
+      perPage: 1000,
+    });
 
-    if (authUserError) throw new Error(`auth user lookup: ${authUserError.message}`);
-    if (!authUser?.id) throw new Error(`No auth user found for ${summaryUserEmail}`);
-    const userId = authUser.id;
+    if (usersError) throw new Error(`auth user lookup: ${usersError.message}`);
+    const matchingUser = usersPage.users.find(
+      (u: { email?: string | null }) => (u.email ?? "").trim().toLowerCase() === summaryUserEmail
+    );
+    if (!matchingUser?.id) throw new Error(`No auth user found for ${summaryUserEmail}`);
+    const userId = matchingUser.id;
 
     // Build Mon–Fri dates for the current week
     const now = new Date();
