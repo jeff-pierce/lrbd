@@ -86,7 +86,7 @@ const METRICS = [
   { id: "connections", label: "Connections",   icon: "🤝", color: "#845EF7", goal: 15, cadence: "daily" },
   { id: "replies",     label: "Replies",  icon: "↩️", color: "#4DABF7", goal: 5,  cadence: "daily" },
   { id: "posts",       label: "Posts",   icon: "✍️", color: "#FFD43B", goal: 3,  cadence: "weekly" },
-  { id: "calls",       label: "Calls Booked",      icon: "📞", color: "#E064F7", goal: 8,  cadence: "weekly" },
+  { id: "calls",       label: "Meetings",      icon: "📞", color: "#E064F7", goal: 8,  cadence: "weekly" },
 ];
 
 const DAILY_METRICS  = METRICS.filter(m => m.cadence === "daily");
@@ -241,7 +241,7 @@ function DailyCard({ metric, value, onIncrement, onDecrement }) {
     <div style={{
       background: "rgba(255,255,255,0.04)",
       border: `1px solid ${done ? metric.color + "55" : "rgba(255,255,255,0.07)"}`,
-      borderRadius: 20, padding: "18px 14px",
+      borderRadius: 20, padding: "12px 14px",
       display: "flex", flexDirection: "column", gap: 9,
       position: "relative", overflow: "hidden", transition: "border-color 0.3s", minWidth: 0,
     }}>
@@ -298,7 +298,7 @@ function WeeklyCard({ metric, weekTotal, todayValue, onIncrement, onDecrement })
     <div style={{
       background: "rgba(255,255,255,0.04)",
       border: `1px solid ${done ? metric.color + "55" : "rgba(255,255,255,0.07)"}`,
-      borderRadius: 20, padding: "18px 14px",
+      borderRadius: 20, padding: "12px 14px",
       display: "flex", flexDirection: "column", gap: 9,
       position: "relative", overflow: "hidden", transition: "border-color 0.3s", minWidth: 0,
     }}>
