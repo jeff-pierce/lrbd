@@ -121,46 +121,44 @@ function AuthCard({
             </button>
           </form>
         )}
-        {hasSentCode && (
-          <form
-            onSubmit={onVerifyLink}
-            style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}
+        <form
+          onSubmit={onVerifyLink}
+          style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}
+        >
+          <input
+            type="text"
+            value={linkUrl}
+            onChange={(e) => setLinkUrl(e.target.value)}
+            placeholder="Paste full magic link URL"
+            style={{
+              width: "100%",
+              borderRadius: 10,
+              border: "1px solid rgba(255,255,255,0.15)",
+              background: "rgba(255,255,255,0.03)",
+              color: "#fff",
+              padding: "11px 12px",
+              fontSize: 13,
+              outline: "none",
+            }}
+          />
+          <button
+            type="submit"
+            disabled={isVerifying || !linkUrl.trim()}
+            style={{
+              border: "1px solid rgba(0,198,167,0.45)",
+              background: "rgba(0,198,167,0.15)",
+              color: "#00C6A7",
+              borderRadius: 10,
+              padding: "10px 12px",
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: isVerifying ? "default" : "pointer",
+              opacity: isVerifying || !linkUrl.trim() ? 0.6 : 1,
+            }}
           >
-            <input
-              type="text"
-              value={linkUrl}
-              onChange={(e) => setLinkUrl(e.target.value)}
-              placeholder="Paste full magic link URL"
-              style={{
-                width: "100%",
-                borderRadius: 10,
-                border: "1px solid rgba(255,255,255,0.15)",
-                background: "rgba(255,255,255,0.03)",
-                color: "#fff",
-                padding: "11px 12px",
-                fontSize: 13,
-                outline: "none",
-              }}
-            />
-            <button
-              type="submit"
-              disabled={isVerifying || !linkUrl.trim()}
-              style={{
-                border: "1px solid rgba(0,198,167,0.45)",
-                background: "rgba(0,198,167,0.15)",
-                color: "#00C6A7",
-                borderRadius: 10,
-                padding: "10px 12px",
-                fontSize: 13,
-                fontWeight: 700,
-                cursor: isVerifying ? "default" : "pointer",
-                opacity: isVerifying || !linkUrl.trim() ? 0.6 : 1,
-              }}
-            >
-              {isVerifying ? "Verifying..." : "Use Pasted Link"}
-            </button>
-          </form>
-        )}
+            {isVerifying ? "Verifying..." : "Use Pasted Link"}
+          </button>
+        </form>
         {authMessage && (
           <div style={{ marginTop: 12, fontSize: 12, color: "rgba(255,255,255,0.65)", lineHeight: 1.5 }}>
             {authMessage}
