@@ -981,14 +981,31 @@ export default function App() {
       const tokenHash = url.searchParams.get("token_hash");
       const type = url.searchParams.get("type") || "magiclink";
 
-      if (!tokenHash) {
-        throw new Error("Missing token_hash in link");
-      }
+      let error = null;
 
-      const { error } = await supabase.auth.verifyOtp({
-        token_hash: tokenHash,
-        type,
-      });
+      if (tokenHash) {
+        const result = await supabase.auth.verifyOtp({
+          token_hash: tokenHash,
+          type,
+        });
+        error = result.error;
+      } else {
+        // Some Supabase magic links carry tokens in the URL fragment (#access_token=...)
+        // instead of query params. Support both formats for PWA copy/paste login.
+        const hashParams = new URLSearchParams(url.hash?.startsWith("#") ? url.hash.slice(1) : "");
+        const accessToken = hashParams.get("access_token");
+        const refreshToken = hashParams.get("refresh_token");
+
+        if (!accessToken || !refreshToken) {
+          throw new Error("Link missing token_hash or access_token/refresh_token");
+        }
+
+        const result = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+        error = result.error;
+      }
 
       if (error) {
         setAuthMessage(`Could not use pasted link: ${error.message}`);
