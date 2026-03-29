@@ -14,12 +14,15 @@ function AuthCard({
   setEmail,
   code,
   setCode,
+  linkUrl,
+  setLinkUrl,
   hasSentCode,
   authMessage,
   isSending,
   isVerifying,
   onSendLink,
   onVerifyCode,
+  onVerifyLink,
 }) {
   return (
     <div style={{ minHeight: "100vh", background: "#0A0A0F", fontFamily: "'Sora', sans-serif", color: "#fff", display: "grid", placeItems: "center", padding: 20 }}>
@@ -115,6 +118,46 @@ function AuthCard({
               }}
             >
               {isVerifying ? "Verifying..." : "Verify Code"}
+            </button>
+          </form>
+        )}
+        {hasSentCode && (
+          <form
+            onSubmit={onVerifyLink}
+            style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}
+          >
+            <input
+              type="text"
+              value={linkUrl}
+              onChange={(e) => setLinkUrl(e.target.value)}
+              placeholder="Paste full magic link URL"
+              style={{
+                width: "100%",
+                borderRadius: 10,
+                border: "1px solid rgba(255,255,255,0.15)",
+                background: "rgba(255,255,255,0.03)",
+                color: "#fff",
+                padding: "11px 12px",
+                fontSize: 13,
+                outline: "none",
+              }}
+            />
+            <button
+              type="submit"
+              disabled={isVerifying || !linkUrl.trim()}
+              style={{
+                border: "1px solid rgba(0,198,167,0.45)",
+                background: "rgba(0,198,167,0.15)",
+                color: "#00C6A7",
+                borderRadius: 10,
+                padding: "10px 12px",
+                fontSize: 13,
+                fontWeight: 700,
+                cursor: isVerifying ? "default" : "pointer",
+                opacity: isVerifying || !linkUrl.trim() ? 0.6 : 1,
+              }}
+            >
+              {isVerifying ? "Verifying..." : "Use Pasted Link"}
             </button>
           </form>
         )}
@@ -807,6 +850,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [authEmail, setAuthEmail] = useState("");
   const [authCode, setAuthCode] = useState("");
+  const [authLinkUrl, setAuthLinkUrl] = useState("");
   const [hasSentAuthCode, setHasSentAuthCode] = useState(false);
   const [authMessage, setAuthMessage] = useState("");
   const [isSendingAuthLink, setIsSendingAuthLink] = useState(false);
@@ -925,6 +969,41 @@ export default function App() {
     }
     setIsVerifyingAuthCode(false);
   }, [authEmail, authCode]);
+
+  const verifyPastedMagicLink = useCallback(async (e) => {
+    e.preventDefault();
+    const raw = authLinkUrl.trim();
+    if (!raw) return;
+
+    setIsVerifyingAuthCode(true);
+    setAuthMessage("");
+
+    try {
+      const url = new URL(raw);
+      const tokenHash = url.searchParams.get("token_hash");
+      const type = url.searchParams.get("type") || "magiclink";
+
+      if (!tokenHash) {
+        throw new Error("Missing token_hash in link");
+      }
+
+      const { error } = await supabase.auth.verifyOtp({
+        token_hash: tokenHash,
+        type,
+      });
+
+      if (error) {
+        setAuthMessage(`Could not use pasted link: ${error.message}`);
+      } else {
+        setAuthMessage("Link verified. Signing you in...");
+        setAuthLinkUrl("");
+      }
+    } catch (err) {
+      setAuthMessage(`Could not use pasted link: ${err.message || "Invalid URL"}`);
+    }
+
+    setIsVerifyingAuthCode(false);
+  }, [authLinkUrl]);
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
@@ -1081,17 +1160,21 @@ export default function App() {
         setEmail={(value) => {
           setAuthEmail(value);
           setAuthCode("");
+          setAuthLinkUrl("");
           setHasSentAuthCode(false);
           setAuthMessage("");
         }}
         code={authCode}
         setCode={setAuthCode}
+        linkUrl={authLinkUrl}
+        setLinkUrl={setAuthLinkUrl}
         hasSentCode={hasSentAuthCode}
         authMessage={authMessage}
         isSending={isSendingAuthLink}
         isVerifying={isVerifyingAuthCode}
         onSendLink={sendMagicLink}
         onVerifyCode={verifyEmailCode}
+        onVerifyLink={verifyPastedMagicLink}
       />
     );
   }
