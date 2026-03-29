@@ -81,11 +81,11 @@ function AuthCard({
 
 // ── Metrics config ────────────────────────────────────────────
 const METRICS = [
-  { id: "comments",    label: "LinkedIn Comments", icon: "💬", color: "#00C6A7", goal: 5,  cadence: "daily" },
-  { id: "followups",   label: "Follow-ups Sent",   icon: "📨", color: "#FF6B35", goal: 15, cadence: "daily" },
-  { id: "connections", label: "New Connections",   icon: "🤝", color: "#845EF7", goal: 15, cadence: "daily" },
-  { id: "replies",     label: "Replies Received",  icon: "↩️", color: "#4DABF7", goal: 5,  cadence: "daily" },
-  { id: "posts",       label: "Posts Published",   icon: "✍️", color: "#FFD43B", goal: 3,  cadence: "weekly" },
+  { id: "comments",    label: "Comments", icon: "💬", color: "#00C6A7", goal: 5,  cadence: "daily" },
+  { id: "followups",   label: "Follow-ups",   icon: "📨", color: "#FF6B35", goal: 15, cadence: "daily" },
+  { id: "connections", label: "Connections",   icon: "🤝", color: "#845EF7", goal: 15, cadence: "daily" },
+  { id: "replies",     label: "Replies",  icon: "↩️", color: "#4DABF7", goal: 5,  cadence: "daily" },
+  { id: "posts",       label: "Posts",   icon: "✍️", color: "#FFD43B", goal: 3,  cadence: "weekly" },
   { id: "calls",       label: "Calls Booked",      icon: "📞", color: "#E064F7", goal: 8,  cadence: "weekly" },
 ];
 
@@ -241,8 +241,8 @@ function DailyCard({ metric, value, onIncrement, onDecrement }) {
     <div style={{
       background: "rgba(255,255,255,0.04)",
       border: `1px solid ${done ? metric.color + "55" : "rgba(255,255,255,0.07)"}`,
-      borderRadius: 20, padding: "20px 16px",
-      display: "flex", flexDirection: "column", gap: 10,
+      borderRadius: 20, padding: "18px 14px",
+      display: "flex", flexDirection: "column", gap: 9,
       position: "relative", overflow: "hidden", transition: "border-color 0.3s", minWidth: 0,
     }}>
       {done && <div style={{
@@ -298,8 +298,8 @@ function WeeklyCard({ metric, weekTotal, todayValue, onIncrement, onDecrement })
     <div style={{
       background: "rgba(255,255,255,0.04)",
       border: `1px solid ${done ? metric.color + "55" : "rgba(255,255,255,0.07)"}`,
-      borderRadius: 20, padding: "20px 16px",
-      display: "flex", flexDirection: "column", gap: 10,
+      borderRadius: 20, padding: "18px 14px",
+      display: "flex", flexDirection: "column", gap: 9,
       position: "relative", overflow: "hidden", transition: "border-color 0.3s", minWidth: 0,
     }}>
       {done && <div style={{
@@ -353,7 +353,7 @@ function WeeklyCard({ metric, weekTotal, todayValue, onIncrement, onDecrement })
 // ── Section label ─────────────────────────────────────────────
 function SectionLabel({ children }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
       <div style={{ fontSize: 10, letterSpacing: "0.18em", textTransform: "uppercase", color: "rgba(255,255,255,0.25)", fontFamily: "'DM Mono', monospace", whiteSpace: "nowrap" }}>
         {children}
       </div>
@@ -602,11 +602,11 @@ function WeekView({ allData, weekMonday, onPrevWeek, onNextWeek, onGoToCurrentWe
         )}
       </div>
       <SectionLabel>Daily Goals · Week Totals</SectionLabel>
-      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 9, marginBottom: 18 }}>
         {DAILY_METRICS.map(m => <MetricWeekRow key={m.id} m={m} />)}
       </div>
       <SectionLabel>Weekly Goals</SectionLabel>
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
         {WEEKLY_METRICS.map(m => <MetricWeekRow key={m.id} m={m} />)}
       </div>
       <div style={{ marginTop: 16, padding: "14px 18px", borderRadius: 14, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -1122,7 +1122,7 @@ export default function App() {
         {/* Tabs */}
         <div style={{ display: "flex", gap: 4, marginBottom: 28, background: "rgba(255,255,255,0.04)", padding: 4, borderRadius: 12 }}>
           {[["today", "Today"], ["week", "This Week"], ["history", "History"]].map(([t, label]) => (
-            <button key={t} onClick={() => setTab(t)} style={{
+            <button key={t} onClick={() => { if (t === "today" && tab === "today") setSelectedDate(todayStr()); setTab(t); }} style={{
               flex: 1, padding: "8px 0", borderRadius: 9, border: "none", cursor: "pointer",
               background: tab === t ? "rgba(255,255,255,0.1)" : "transparent",
               color: tab === t ? "#fff" : "rgba(255,255,255,0.35)",
@@ -1307,7 +1307,7 @@ export default function App() {
             )}
             <div key={selectedDate} className="date-shift">
             <SectionLabel>Daily Goals</SectionLabel>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12, marginBottom: 24 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 11, marginBottom: 22 }}>
               {DAILY_METRICS.map((m, i) => (
                 <div key={m.id} className="card-appear" style={{ animationDelay: `${i * 0.06}s`, animationFillMode: "both", minWidth: 0 }}>
                   <DailyCard metric={m} value={dayData[m.id] || 0} onIncrement={() => update(m.id, 1)} onDecrement={() => update(m.id, -1)} />
@@ -1315,7 +1315,7 @@ export default function App() {
               ))}
             </div>
             <SectionLabel>Weekly Goals</SectionLabel>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12, marginBottom: 24 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 11, marginBottom: 22 }}>
               {WEEKLY_METRICS.map((m, i) => (
                 <div key={m.id} className="card-appear" style={{ animationDelay: `${(DAILY_METRICS.length + i) * 0.06}s`, animationFillMode: "both", minWidth: 0 }}>
                   <WeeklyCard metric={m} weekTotal={weekTotals[m.id]} todayValue={dayData[m.id] || 0} onIncrement={() => update(m.id, 1)} onDecrement={() => update(m.id, -1)} />
