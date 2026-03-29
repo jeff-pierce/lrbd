@@ -27,10 +27,44 @@ function isoDate(d: Date): string {
   return d.toISOString().split("T")[0];
 }
 
+function getNewYorkHourAndWeekday(d: Date): { hour: number; weekday: string } {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hour: "2-digit",
+    hour12: false,
+    weekday: "short",
+  });
+  const parts = formatter.formatToParts(d);
+  const hourPart = parts.find((p) => p.type === "hour")?.value ?? "00";
+  const weekdayPart = parts.find((p) => p.type === "weekday")?.value ?? "Mon";
+  return { hour: Number(hourPart), weekday: weekdayPart };
+}
+
 Deno.serve(async (req) => {
   // Allow manual triggers via POST as well as cron invocations
   if (req.method !== "POST" && req.method !== "GET") {
     return new Response("Method not allowed", { status: 405 });
+  }
+
+  let scheduledRun = false;
+  if (req.method === "POST") {
+    try {
+      const body = await req.json();
+      scheduledRun = Boolean(body?.scheduled);
+    } catch {
+      scheduledRun = false;
+    }
+  }
+
+  if (scheduledRun) {
+    const now = new Date();
+    const ny = getNewYorkHourAndWeekday(now);
+    if (ny.weekday !== "Mon" || ny.hour !== 7) {
+      return new Response(
+        JSON.stringify({ skipped: true, reason: "Scheduled run allowed only at 7:00 AM America/New_York on Monday" }),
+        { headers: { "Content-Type": "application/json" } }
+      );
+    }
   }
 
   try {
