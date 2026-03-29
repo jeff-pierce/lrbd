@@ -977,8 +977,27 @@ export default function App() {
     setAuthMessage("");
 
     try {
-      const url = new URL(raw);
+      const tryExtractUrl = (value) => {
+        try {
+          return new URL(value);
+        } catch {
+          return null;
+        }
+      };
+
+      const direct = tryExtractUrl(raw);
+      if (!direct) throw new Error("Invalid URL");
+
+      // Some email clients wrap links inside query params like url= or redirect=.
+      const wrapped =
+        direct.searchParams.get("url") ||
+        direct.searchParams.get("redirect") ||
+        direct.searchParams.get("redirect_to") ||
+        direct.searchParams.get("redirectUrl");
+      const url = wrapped ? (tryExtractUrl(decodeURIComponent(wrapped)) || direct) : direct;
+
       const tokenHash = url.searchParams.get("token_hash");
+      const token = url.searchParams.get("token");
       const type = url.searchParams.get("type") || "magiclink";
 
       let error = null;
@@ -987,6 +1006,13 @@ export default function App() {
         const result = await supabase.auth.verifyOtp({
           token_hash: tokenHash,
           type,
+        });
+        error = result.error;
+      } else if (token) {
+        const result = await supabase.auth.verifyOtp({
+          email: authEmail.trim(),
+          token,
+          type: "email",
         });
         error = result.error;
       } else {
