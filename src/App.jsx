@@ -1005,6 +1005,16 @@ export default function App() {
         return normalized;
       };
 
+      const tryVerifyWithAttempts = async (attempts) => {
+        let lastError = null;
+        for (const payload of attempts) {
+          const { error: verifyError } = await supabase.auth.verifyOtp(payload);
+          if (!verifyError) return null;
+          lastError = verifyError;
+        }
+        return lastError;
+      };
+
       // Always trust direct URL tokens first.
       let { tokenHashValue, tokenValue, typeValue, accessTokenValue, refreshTokenValue } = getAuthBits(direct);
 
@@ -1025,21 +1035,32 @@ export default function App() {
       }
 
       const otpType = normalizeOtpType(typeValue);
+      const trimmedEmail = authEmail.trim();
 
       let error = null;
 
       if (tokenHashValue) {
-        const result = await supabase.auth.verifyOtp({
-          token_hash: tokenHashValue,
-          type: otpType,
-        });
-        error = result.error;
+        error = await tryVerifyWithAttempts([
+          { token_hash: tokenHashValue, type: otpType },
+          { token_hash: tokenHashValue, type: "email" },
+          ...(trimmedEmail
+            ? [
+                { email: trimmedEmail, token: tokenHashValue, type: "magiclink" },
+                { email: trimmedEmail, token: tokenHashValue, type: "email" },
+              ]
+            : []),
+        ]);
       } else if (tokenValue) {
-        const result = await supabase.auth.verifyOtp({
-          token_hash: tokenValue,
-          type: otpType,
-        });
-        error = result.error;
+        error = await tryVerifyWithAttempts([
+          { token_hash: tokenValue, type: otpType },
+          { token_hash: tokenValue, type: "email" },
+          ...(trimmedEmail
+            ? [
+                { email: trimmedEmail, token: tokenValue, type: "magiclink" },
+                { email: trimmedEmail, token: tokenValue, type: "email" },
+              ]
+            : []),
+        ]);
       } else {
         if (!accessTokenValue || !refreshTokenValue) {
           throw new Error("Link missing token_hash or access_token/refresh_token");
@@ -1053,7 +1074,13 @@ export default function App() {
       }
 
       if (error) {
-        setAuthMessage(`Could not use pasted link: ${error.message}`);
+        const message = String(error.message || "Unknown error");
+        const looksExpired = /invalid|expired/i.test(message);
+        if (looksExpired) {
+          setAuthMessage(`Could not use pasted link: ${message}. Request a fresh link and use it once right away.`);
+        } else {
+          setAuthMessage(`Could not use pasted link: ${message}`);
+        }
       } else {
         setAuthMessage("Link verified. Signing you in...");
         setAuthLinkUrl("");
@@ -1063,7 +1090,7 @@ export default function App() {
     }
 
     setIsVerifyingAuthCode(false);
-  }, [authLinkUrl]);
+  }, [authEmail, authLinkUrl]);
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
