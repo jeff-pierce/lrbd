@@ -998,6 +998,13 @@ export default function App() {
         return { tokenHashValue, tokenValue, typeValue, accessTokenValue, refreshTokenValue };
       };
 
+      const normalizeOtpType = (value) => {
+        const normalized = String(value || "").toLowerCase();
+        if (!normalized) return "email";
+        if (normalized === "magiclink" || normalized === "email") return "email";
+        return normalized;
+      };
+
       // Always trust direct URL tokens first.
       let { tokenHashValue, tokenValue, typeValue, accessTokenValue, refreshTokenValue } = getAuthBits(direct);
 
@@ -1017,18 +1024,20 @@ export default function App() {
         }
       }
 
+      const otpType = normalizeOtpType(typeValue);
+
       let error = null;
 
       if (tokenHashValue) {
         const result = await supabase.auth.verifyOtp({
           token_hash: tokenHashValue,
-          type: typeValue,
+          type: otpType,
         });
         error = result.error;
       } else if (tokenValue) {
         const result = await supabase.auth.verifyOtp({
           token_hash: tokenValue,
-          type: typeValue,
+          type: otpType,
         });
         error = result.error;
       } else {
