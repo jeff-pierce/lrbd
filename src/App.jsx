@@ -287,21 +287,21 @@ async function upsertMetric(userId, date, metricId, value) {
 async function fetchAllReflections(userId) {
   const { data, error } = await supabase
     .from("reflections")
-    .select("date, wins, learnings")
+    .select("date, wins, learnings, is_day_off")
     .eq("user_id", userId);
   if (error) throw error;
   const shaped = {};
   for (const row of data) {
-    shaped[row.date] = { wins: row.wins || "", learnings: row.learnings || "" };
+    shaped[row.date] = { wins: row.wins || "", learnings: row.learnings || "", is_day_off: row.is_day_off || false };
   }
   return shaped;
 }
 
-async function upsertReflection(userId, date, wins, learnings) {
+async function upsertReflection(userId, date, wins, learnings, isDayOff = false) {
   const { error } = await supabase
     .from("reflections")
     .upsert(
-      { user_id: userId, date, wins, learnings, updated_at: new Date().toISOString() },
+      { user_id: userId, date, wins, learnings, is_day_off: isDayOff, updated_at: new Date().toISOString() },
       { onConflict: "user_id,date" }
     );
   if (error) throw error;
@@ -498,27 +498,38 @@ function HistoryRow({ dateStr, data }) {
 }
 
 // ── This Week view ────────────────────────────────────────────
-function WeekView({ allData, weekMonday, onPrevWeek, onNextWeek, onGoToCurrentWeek }) {
+function WeekView({ allData, allReflections, weekMonday, onPrevWeek, onNextWeek, onGoToCurrentWeek }) {
   const monday = weekMonday;
   const weekDays = getWeekDays(monday);
   const todayDate = todayStr();
   const todayMonday = getMondayOf(todayDate);
   const isCurrentWeek = monday === todayMonday;
-  const daysElapsed = isCurrentWeek ? Math.max(1, Math.min(workDayIndex(todayDate), 5)) : 5;
-  const daysRemaining = Math.max(0, 5 - daysElapsed);
+
+  // Calendar days elapsed this week (1–5)
+  const calendarDaysElapsed = isCurrentWeek ? Math.max(1, Math.min(workDayIndex(todayDate), 5)) : 5;
+
+  // Days-off accounting
+  const elapsedWeekDays = weekDays.slice(0, calendarDaysElapsed);
+  const daysOffElapsed = elapsedWeekDays.filter(d => allReflections[d]?.is_day_off).length;
+  const daysOffRemaining = weekDays.slice(calendarDaysElapsed).filter(d => allReflections[d]?.is_day_off).length;
+  const daysOff = daysOffElapsed + daysOffRemaining;
+  const effectiveTotal = Math.max(1, 5 - daysOff);
+  const effectiveDaysElapsed = Math.max(1, calendarDaysElapsed - daysOffElapsed);
+  const effectiveDaysRemaining = Math.max(0, (5 - calendarDaysElapsed) - daysOffRemaining);
 
   const weekTotals = {};
   METRICS.forEach(m => {
     weekTotals[m.id] = weekDays.reduce((s, d) => s + (allData[d]?.[m.id] || 0), 0);
   });
 
-  const effectiveWeekGoal = (m) => m.cadence === "daily" ? m.goal * 5 : m.goal;
+  const effectiveWeekGoal = (m) => m.cadence === "daily" ? m.goal * effectiveTotal : m.goal;
 
   const pace = (m) => {
     const actual = weekTotals[m.id];
     const goal = effectiveWeekGoal(m);
     if (actual >= goal) return "done";
-    const required = (goal / 5) * daysElapsed;
+    if (effectiveDaysElapsed === 0) return "on-track";
+    const required = (goal / effectiveTotal) * effectiveDaysElapsed;
     if (actual >= required * 0.9) return "on-track";
     if (actual >= required * 0.6) return "behind";
     return "at-risk";
@@ -531,7 +542,10 @@ function WeekView({ allData, weekMonday, onPrevWeek, onNextWeek, onGoToCurrentWe
     "at-risk":  { label: "At risk ⚠",      bg: "#FF3B3015", border: "#FF3B3055", text: "#FF5555" },
   };
 
-  const projected = (m) => Math.round((weekTotals[m.id] / daysElapsed) * 5);
+  const projected = (m) => {
+    if (effectiveDaysElapsed === 0) return 0;
+    return Math.round((weekTotals[m.id] / effectiveDaysElapsed) * effectiveTotal);
+  };
 
   const weekLabel = formatWeekRange(monday);
   const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri"];
@@ -544,7 +558,7 @@ function WeekView({ allData, weekMonday, onPrevWeek, onNextWeek, onGoToCurrentWe
     const status = pace(m);
     const sc = statusConfig[status];
     const proj = projected(m);
-    const neededPerDay = daysRemaining > 0 ? Math.ceil(Math.max(0, goal - actual) / daysRemaining) : 0;
+    const neededPerDay = effectiveDaysRemaining > 0 ? Math.ceil(Math.max(0, goal - actual) / effectiveDaysRemaining) : 0;
     const barColor = status === "done" || status === "on-track" ? m.color : status === "behind" ? "#FF6B35" : "#FF5555";
 
     return (
@@ -555,7 +569,7 @@ function WeekView({ allData, weekMonday, onPrevWeek, onNextWeek, onGoToCurrentWe
             <div>
               <div style={{ fontSize: 13, fontWeight: 600 }}>{m.label}</div>
               <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 2 }}>
-                {actual} / {goal}{m.cadence === "daily" ? ` (5×${m.goal})` : " wk"} · {pct}%
+                {actual} / {goal}{m.cadence === "daily" ? ` (${effectiveTotal}×${m.goal})` : " wk"} · {pct}%
               </div>
             </div>
           </div>
@@ -569,31 +583,32 @@ function WeekView({ allData, weekMonday, onPrevWeek, onNextWeek, onGoToCurrentWe
         <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
           {weekDays.map((d, i) => {
             const v = allData[d]?.[m.id] || 0;
-            const hit = m.cadence === "daily" ? v >= m.goal : v > 0;
+            const isDayOff = allReflections[d]?.is_day_off || false;
+            const hit = !isDayOff && m.cadence === "daily" ? v >= m.goal : !isDayOff && v > 0;
             const isToday = d === todayDate;
             const isPast = d <= todayDate;
             return (
               <div key={d} style={{ flex: 1, textAlign: "center" }}>
                 <div style={{
                   height: 28, borderRadius: 6,
-                  background: hit ? `${m.color}30` : isPast ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.02)",
-                  border: isToday ? `1px solid ${m.color}88` : hit ? `1px solid ${m.color}55` : "1px solid rgba(255,255,255,0.06)",
+                  background: isDayOff ? "rgba(255,255,255,0.02)" : hit ? `${m.color}30` : isPast ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.02)",
+                  border: isDayOff ? "1px solid rgba(255,255,255,0.05)" : isToday ? `1px solid ${m.color}88` : hit ? `1px solid ${m.color}55` : "1px solid rgba(255,255,255,0.06)",
                   display: "flex", alignItems: "center", justifyContent: "center",
                   fontFamily: "'DM Mono', monospace", fontSize: 11,
-                  color: hit ? m.color : isPast ? "rgba(255,255,255,0.4)" : "rgba(255,255,255,0.15)",
+                  color: isDayOff ? (v > 0 ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.18)") : hit ? m.color : isPast ? "rgba(255,255,255,0.4)" : "rgba(255,255,255,0.15)",
                   fontWeight: hit ? 700 : 400, transition: "all 0.2s",
                 }}>
-                  {v > 0 ? v : "·"}
+                  {isDayOff ? (v > 0 ? v : "—") : v > 0 ? v : "·"}
                 </div>
-                <div style={{ fontSize: 9, color: isToday ? m.color : "rgba(255,255,255,0.2)", marginTop: 3, fontFamily: "'DM Mono', monospace" }}>{dayNames[i]}</div>
+                <div style={{ fontSize: 9, color: isDayOff ? "rgba(255,255,255,0.15)" : isToday ? m.color : "rgba(255,255,255,0.2)", marginTop: 3, fontFamily: "'DM Mono', monospace" }}>{dayNames[i]}</div>
               </div>
             );
           })}
         </div>
         {status !== "done" && (
           <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", fontFamily: "'DM Mono', monospace" }}>
-            {daysRemaining > 0
-              ? <>Need <span style={{ color: "rgba(255,255,255,0.6)", fontWeight: 700 }}>{neededPerDay}/day</span> for {daysRemaining} more day{daysRemaining !== 1 ? "s" : ""} · Projected: <span style={{ color: proj >= goal ? "#00C6A7" : "#FF6B35", fontWeight: 700 }}>{proj}</span> by Fri</>
+            {effectiveDaysRemaining > 0
+              ? <>Need <span style={{ color: "rgba(255,255,255,0.6)", fontWeight: 700 }}>{neededPerDay}/day</span> for {effectiveDaysRemaining} more day{effectiveDaysRemaining !== 1 ? "s" : ""} · Projected: <span style={{ color: proj >= goal ? "#00C6A7" : "#FF6B35", fontWeight: 700 }}>{proj}</span> by Fri</>
               : <>Week ended · {actual >= goal ? "Goal reached ✓" : `Finished ${actual}/${goal}`}</>
             }
           </div>
@@ -662,7 +677,7 @@ function WeekView({ allData, weekMonday, onPrevWeek, onNextWeek, onGoToCurrentWe
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 13, color: "rgba(255,255,255,0.4)" }}>
-          Day <span style={{ color: "#fff", fontWeight: 700 }}>{daysElapsed}</span> of 5
+          Day <span style={{ color: "#fff", fontWeight: 700 }}>{effectiveDaysElapsed}</span> of {effectiveTotal}
         </div>
         {!isCurrentWeek ? (
           <button
@@ -687,7 +702,7 @@ function WeekView({ allData, weekMonday, onPrevWeek, onNextWeek, onGoToCurrentWe
           </button>
         ) : (
           <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: "rgba(255,255,255,0.25)", marginTop: 2 }}>
-            {daysRemaining}d left
+            {effectiveDaysRemaining}d left
           </div>
         )}
       </div>
@@ -1161,15 +1176,15 @@ export default function App() {
   }, [tab, selectedDate, dismissKeyHint, goPrevWeek, goNextWeek]);
 
   // Debounced reflection save — waits 1200ms after last keystroke
-  const scheduleReflectionUpsert = useCallback((date, wins, learnings) => {
-    reflectionPendingRef.current[date] = { wins, learnings };
+  const scheduleReflectionUpsert = useCallback((date, wins, learnings, isDayOff) => {
+    reflectionPendingRef.current[date] = { wins, learnings, isDayOff };
     clearTimeout(reflectionDebounceRef.current[date]);
     setSyncStatus("syncing");
     reflectionDebounceRef.current[date] = setTimeout(async () => {
-      const { wins: w, learnings: l } = reflectionPendingRef.current[date];
+      const { wins: w, learnings: l, isDayOff: off } = reflectionPendingRef.current[date];
       if (!currentUser?.id) return;
       try {
-        await upsertReflection(currentUser.id, date, w, l);
+        await upsertReflection(currentUser.id, date, w, l, off);
         setSyncStatus("synced");
       } catch {
         setSyncStatus("error");
@@ -1179,13 +1194,39 @@ export default function App() {
 
   const updateReflection = useCallback((date, field, value) => {
     setAllReflections(prev => {
-      const current = prev[date] || { wins: "", learnings: "" };
+      const current = prev[date] || { wins: "", learnings: "", is_day_off: false };
       const updated = { ...prev, [date]: { ...current, [field]: value } };
       const entry = updated[date];
-      scheduleReflectionUpsert(date, entry.wins, entry.learnings);
+      scheduleReflectionUpsert(date, entry.wins, entry.learnings, entry.is_day_off);
       return updated;
     });
   }, [scheduleReflectionUpsert]);
+
+  const toggleDayOff = useCallback(async (date) => {
+    const current = allReflections[date] || { wins: "", learnings: "", is_day_off: false };
+    const newVal = !current.is_day_off;
+    // Use latest pending text values if a debounced save is in flight
+    const pending = reflectionPendingRef.current[date];
+    const wins = pending?.wins ?? current.wins;
+    const learnings = pending?.learnings ?? current.learnings;
+    setAllReflections(prev => ({
+      ...prev,
+      [date]: { ...current, wins, learnings, is_day_off: newVal },
+    }));
+    // Cancel pending text debounce and save everything immediately
+    clearTimeout(reflectionDebounceRef.current[date]);
+    if (reflectionPendingRef.current[date]) {
+      reflectionPendingRef.current[date].isDayOff = newVal;
+    }
+    if (!currentUser?.id) return;
+    setSyncStatus("syncing");
+    try {
+      await upsertReflection(currentUser.id, date, wins, learnings, newVal);
+      setSyncStatus("synced");
+    } catch {
+      setSyncStatus("error");
+    }
+  }, [allReflections, currentUser]);
 
   // Debounced upsert — waits 800ms after last tap before writing to Supabase
   const scheduleUpsert = useCallback((date, metricId, value) => {
@@ -1560,6 +1601,46 @@ export default function App() {
               </button>
             )}
             <div key={selectedDate} className="date-shift">
+            {/* Day-off toggle */}
+            {(() => {
+              const isDayOff = allReflections[selectedDate]?.is_day_off || false;
+              return (
+                <button
+                  onClick={() => toggleDayOff(selectedDate)}
+                  aria-label={isDayOff ? "Remove day-off flag" : "Mark as day off"}
+                  title={isDayOff ? "Remove day-off flag" : "Mark as day off — daily goals won't count toward weekly totals for this day"}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    background: isDayOff ? "rgba(132,94,247,0.08)" : "rgba(255,255,255,0.02)",
+                    border: `1px solid ${isDayOff ? "rgba(132,94,247,0.35)" : "rgba(255,255,255,0.08)"}`,
+                    borderRadius: 10, cursor: "pointer", padding: "7px 12px",
+                    marginBottom: 20, width: "100%", transition: "all 0.2s",
+                  }}
+                >
+                  <div style={{
+                    width: 16, height: 16, borderRadius: 4, flexShrink: 0,
+                    border: `1px solid ${isDayOff ? "#845EF7" : "rgba(255,255,255,0.22)"}`,
+                    background: isDayOff ? "rgba(132,94,247,0.25)" : "transparent",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    transition: "all 0.2s",
+                  }}>
+                    {isDayOff && <span style={{ color: "#845EF7", fontSize: 10, lineHeight: 1, fontWeight: 700 }}>✓</span>}
+                  </div>
+                  <span style={{
+                    fontSize: 11, fontFamily: "'DM Mono', monospace", letterSpacing: "0.07em",
+                    textTransform: "uppercase", transition: "color 0.2s",
+                    color: isDayOff ? "#845EF7" : "rgba(255,255,255,0.3)",
+                  }}>
+                    Day off
+                  </span>
+                  {isDayOff && (
+                    <span style={{ fontSize: 10, color: "rgba(132,94,247,0.65)", fontFamily: "'DM Mono', monospace", marginLeft: "auto" }}>
+                      goals not counted
+                    </span>
+                  )}
+                </button>
+              );
+            })()}
             <SectionLabel>Daily Goals</SectionLabel>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 11, marginBottom: 22 }}>
               {DAILY_METRICS.map((m, i) => (
@@ -1637,6 +1718,7 @@ export default function App() {
           >
             <WeekView
               allData={allData}
+              allReflections={allReflections}
               weekMonday={weekMonday}
               onPrevWeek={goPrevWeek}
               onNextWeek={goNextWeek}

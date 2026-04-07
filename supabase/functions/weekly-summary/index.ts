@@ -90,9 +90,9 @@ Deno.serve(async (req) => {
     if (!matchingUser?.id) throw new Error(`No auth user found for ${summaryUserEmail}`);
     const userId = matchingUser.id;
 
-    // Build Mon–Fri dates for the current week
+    // Build Mon–Fri dates for the previous week
     const now = new Date();
-    const monday = getMondayOf(now);
+    const monday = getMondayOf(new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000));
     const weekDays = Array.from({ length: 5 }, (_, i) => {
       const d = new Date(monday);
       d.setUTCDate(monday.getUTCDate() + i);
@@ -102,7 +102,7 @@ Deno.serve(async (req) => {
     // Fetch metrics + reflections in parallel
     const [metricsRes, reflectionsRes] = await Promise.all([
       supabase.from("metrics").select("date, metric_id, value").eq("user_id", userId).in("date", weekDays),
-      supabase.from("reflections").select("date, wins, learnings").eq("user_id", userId).in("date", weekDays),
+      supabase.from("reflections").select("date, wins, learnings, is_day_off").eq("user_id", userId).in("date", weekDays),
     ]);
 
     if (metricsRes.error) throw new Error(`metrics fetch: ${metricsRes.error.message}`);
@@ -114,6 +114,10 @@ Deno.serve(async (req) => {
       metricsMap[row.date] ??= {};
       metricsMap[row.date][row.metric_id] = row.value;
     }
+
+    // Count days off (only daily-metric goals are reduced)
+    const daysOff = (reflectionsRes.data ?? []).filter((r: { is_day_off?: boolean }) => r.is_day_off).length;
+    const effectiveDays = Math.max(1, 5 - daysOff);
 
     // Calculate week totals
     const weekTotals: Record<string, number> = {};
@@ -130,6 +134,10 @@ Deno.serve(async (req) => {
       .filter((r: { learnings?: string | null }) => r.learnings?.trim())
       .map((r: { learnings?: string | null }) => r.learnings!.trim());
 
+    // Effective goal helper (reduces daily metric goals by days-off count)
+    const effectiveGoalFor = (m: typeof METRICS[number]) =>
+      m.cadence === "daily" ? m.goal * effectiveDays : m.goal;
+
     // Week label
     const fri = new Date(monday);
     fri.setUTCDate(monday.getUTCDate() + 4);
@@ -139,7 +147,7 @@ Deno.serve(async (req) => {
     // Build text summary for Claude
     const metricLines = METRICS.map(m => {
       const total = weekTotals[m.id];
-      const effectiveGoal = m.cadence === "daily" ? m.goal * 5 : m.goal;
+      const effectiveGoal = effectiveGoalFor(m);
       const pct = Math.round((total / effectiveGoal) * 100);
       const flag = total >= effectiveGoal ? "✓" : total >= effectiveGoal * 0.7 ? "~" : "✗";
       return `${flag} ${m.label}: ${total}/${effectiveGoal} (${pct}%)`;
@@ -200,7 +208,7 @@ If wins or learnings are not recorded, explicitly acknowledge that and still pro
     // Build metrics table HTML rows
     const metricsRows = METRICS.map(m => {
       const total = weekTotals[m.id];
-      const effectiveGoal = m.cadence === "daily" ? m.goal * 5 : m.goal;
+      const effectiveGoal = effectiveGoalFor(m);
       const pct = Math.round((total / effectiveGoal) * 100);
       const hit = total >= effectiveGoal;
       const color = hit ? "#a6e3a1" : pct >= 70 ? "#f9e2af" : "#f38ba8";
@@ -252,7 +260,7 @@ If wins or learnings are not recorded, explicitly acknowledge that and still pro
     ${aiSection}
 
     <div style="margin-top:40px;padding-top:20px;border-top:1px solid #1e1e2e;font-size:10px;color:#313244;text-align:center;letter-spacing:0.08em;text-transform:uppercase;">
-      LRBD Tracker &nbsp;·&nbsp; Weekly summary &nbsp;·&nbsp; Every Friday at 3pm ET
+      LRBD Tracker &nbsp;·&nbsp; Weekly summary &nbsp;·&nbsp; Every Monday at 7am ET
     </div>
   </div>
 </body>
