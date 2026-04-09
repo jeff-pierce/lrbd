@@ -287,21 +287,21 @@ async function upsertMetric(userId, date, metricId, value) {
 async function fetchAllReflections(userId) {
   const { data, error } = await supabase
     .from("reflections")
-    .select("date, wins, learnings, is_day_off")
+    .select("date, wins, learnings, stretches, is_day_off")
     .eq("user_id", userId);
   if (error) throw error;
   const shaped = {};
   for (const row of data) {
-    shaped[row.date] = { wins: row.wins || "", learnings: row.learnings || "", is_day_off: row.is_day_off || false };
+    shaped[row.date] = { wins: row.wins || "", learnings: row.learnings || "", stretches: row.stretches || "", is_day_off: row.is_day_off || false };
   }
   return shaped;
 }
 
-async function upsertReflection(userId, date, wins, learnings, isDayOff = false) {
+async function upsertReflection(userId, date, wins, learnings, stretches, isDayOff = false) {
   const { error } = await supabase
     .from("reflections")
     .upsert(
-      { user_id: userId, date, wins, learnings, is_day_off: isDayOff, updated_at: new Date().toISOString() },
+      { user_id: userId, date, wins, learnings, stretches, is_day_off: isDayOff, updated_at: new Date().toISOString() },
       { onConflict: "user_id,date" }
     );
   if (error) throw error;
@@ -1176,15 +1176,15 @@ export default function App() {
   }, [tab, selectedDate, dismissKeyHint, goPrevWeek, goNextWeek]);
 
   // Debounced reflection save — waits 1200ms after last keystroke
-  const scheduleReflectionUpsert = useCallback((date, wins, learnings, isDayOff) => {
-    reflectionPendingRef.current[date] = { wins, learnings, isDayOff };
+  const scheduleReflectionUpsert = useCallback((date, wins, learnings, stretches, isDayOff) => {
+    reflectionPendingRef.current[date] = { wins, learnings, stretches, isDayOff };
     clearTimeout(reflectionDebounceRef.current[date]);
     setSyncStatus("syncing");
     reflectionDebounceRef.current[date] = setTimeout(async () => {
-      const { wins: w, learnings: l, isDayOff: off } = reflectionPendingRef.current[date];
+      const { wins: w, learnings: l, stretches: s, isDayOff: off } = reflectionPendingRef.current[date];
       if (!currentUser?.id) return;
       try {
-        await upsertReflection(currentUser.id, date, w, l, off);
+        await upsertReflection(currentUser.id, date, w, l, s, off);
         setSyncStatus("synced");
       } catch {
         setSyncStatus("error");
@@ -1194,24 +1194,25 @@ export default function App() {
 
   const updateReflection = useCallback((date, field, value) => {
     setAllReflections(prev => {
-      const current = prev[date] || { wins: "", learnings: "", is_day_off: false };
+      const current = prev[date] || { wins: "", learnings: "", stretches: "", is_day_off: false };
       const updated = { ...prev, [date]: { ...current, [field]: value } };
       const entry = updated[date];
-      scheduleReflectionUpsert(date, entry.wins, entry.learnings, entry.is_day_off);
+      scheduleReflectionUpsert(date, entry.wins, entry.learnings, entry.stretches, entry.is_day_off);
       return updated;
     });
   }, [scheduleReflectionUpsert]);
 
   const toggleDayOff = useCallback(async (date) => {
-    const current = allReflections[date] || { wins: "", learnings: "", is_day_off: false };
+    const current = allReflections[date] || { wins: "", learnings: "", stretches: "", is_day_off: false };
     const newVal = !current.is_day_off;
     // Use latest pending text values if a debounced save is in flight
     const pending = reflectionPendingRef.current[date];
     const wins = pending?.wins ?? current.wins;
     const learnings = pending?.learnings ?? current.learnings;
+    const stretches = pending?.stretches ?? current.stretches;
     setAllReflections(prev => ({
       ...prev,
-      [date]: { ...current, wins, learnings, is_day_off: newVal },
+      [date]: { ...current, wins, learnings, stretches, is_day_off: newVal },
     }));
     // Cancel pending text debounce and save everything immediately
     clearTimeout(reflectionDebounceRef.current[date]);
@@ -1221,7 +1222,7 @@ export default function App() {
     if (!currentUser?.id) return;
     setSyncStatus("syncing");
     try {
-      await upsertReflection(currentUser.id, date, wins, learnings, newVal);
+      await upsertReflection(currentUser.id, date, wins, learnings, stretches, newVal);
       setSyncStatus("synced");
     } catch {
       setSyncStatus("error");
@@ -1657,7 +1658,7 @@ export default function App() {
                 </div>
               ))}
             </div>
-            <SectionLabel>Wins &amp; Learnings</SectionLabel>
+            <SectionLabel>Daily Reflection</SectionLabel>
             <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
               <div style={{
                 background: "rgba(255,255,255,0.04)",
@@ -1693,6 +1694,27 @@ export default function App() {
                   value={allReflections[selectedDate]?.learnings || ""}
                   onChange={e => updateReflection(selectedDate, "learnings", e.target.value)}
                   placeholder="What did you learn or want to remember?"
+                  rows={3}
+                  style={{
+                    width: "100%", background: "transparent", border: "none", outline: "none",
+                    color: "rgba(255,255,255,0.8)", fontSize: 13, fontFamily: "'Sora', sans-serif",
+                    resize: "vertical", lineHeight: 1.65, letterSpacing: "0.01em",
+                  }}
+                />
+              </div>
+              <div style={{
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.07)",
+                borderRadius: 16,
+                padding: "14px 16px",
+              }}>
+                <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", fontFamily: "'DM Mono', monospace", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 8 }}>
+                  🔥 Stretches
+                </div>
+                <textarea
+                  value={allReflections[selectedDate]?.stretches || ""}
+                  onChange={e => updateReflection(selectedDate, "stretches", e.target.value)}
+                  placeholder="What's something uncomfortable you did today?"
                   rows={3}
                   style={{
                     width: "100%", background: "transparent", border: "none", outline: "none",

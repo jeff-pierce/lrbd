@@ -102,7 +102,7 @@ Deno.serve(async (req) => {
     // Fetch metrics + reflections in parallel
     const [metricsRes, reflectionsRes] = await Promise.all([
       supabase.from("metrics").select("date, metric_id, value").eq("user_id", userId).in("date", weekDays),
-      supabase.from("reflections").select("date, wins, learnings, is_day_off").eq("user_id", userId).in("date", weekDays),
+      supabase.from("reflections").select("date, wins, learnings, stretches, is_day_off").eq("user_id", userId).in("date", weekDays),
     ]);
 
     if (metricsRes.error) throw new Error(`metrics fetch: ${metricsRes.error.message}`);
@@ -133,6 +133,9 @@ Deno.serve(async (req) => {
     const learningsEntries = sortedReflections
       .filter((r: { learnings?: string | null }) => r.learnings?.trim())
       .map((r: { learnings?: string | null }) => r.learnings!.trim());
+    const stretchesEntries = sortedReflections
+      .filter((r: { stretches?: string | null }) => r.stretches?.trim())
+      .map((r: { stretches?: string | null }) => r.stretches!.trim());
 
     // Effective goal helper (reduces daily metric goals by days-off count)
     const effectiveGoalFor = (m: typeof METRICS[number]) =>
@@ -161,6 +164,7 @@ Deno.serve(async (req) => {
     if (anthropicKey) {
       const winsText      = winsEntries.length > 0      ? winsEntries.join("\n")      : "None recorded this week.";
       const learningsText = learningsEntries.length > 0 ? learningsEntries.join("\n") : "None recorded this week.";
+      const stretchesText = stretchesEntries.length > 0 ? stretchesEntries.join("\n") : "None recorded this week.";
 
       const prompt = `You are writing a weekly summary for a professional tracking their LinkedIn outreach and relationship-building activity. Be direct, grounded, and specific — positive without being generic or pep-talk-y. Use the actual data.
 
@@ -173,17 +177,22 @@ ${winsText}
 LEARNINGS (raw notes from each day):
 ${learningsText}
 
-Write a concise weekly summary with three clearly labeled sections:
+STRETCHES — uncomfortable things done each day:
+${stretchesText}
+
+Write a concise weekly summary with four clearly labeled sections:
 
 **Wins** — identify 2–3 meaningful themes emerging from the wins. Tie them to concrete evidence from the notes. Keep it real and specific.
 
 **Learnings** — identify 2–3 key threads from the learnings, framed as insights rather than mistakes. Be constructive and forward-looking.
 
+**Stretches** — identify 2–3 patterns in the uncomfortable actions taken. Acknowledge the courage it takes and connect them to growth.
+
 **Looking Ahead** — 2–3 sentences connecting patterns from this week to next week. Concrete, actionable, grounded in the person's actual numbers and observations.
 
-Format: plain text suitable for email. Use **bold** for section names only. About 200–250 words total. No bullet points — write in short paragraphs.
+Format: plain text suitable for email. Use **bold** for section names only. About 250–300 words total. No bullet points — write in short paragraphs.
 
-If wins or learnings are not recorded, explicitly acknowledge that and still provide a useful analysis from the metrics and pace patterns.`;
+If wins, learnings, or stretches are not recorded, explicitly acknowledge that and still provide a useful analysis from the metrics and pace patterns.`;
 
       const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
@@ -194,7 +203,7 @@ If wins or learnings are not recorded, explicitly acknowledge that and still pro
         },
         body: JSON.stringify({
           model: "claude-opus-4-5",
-          max_tokens: 700,
+          max_tokens: 900,
           messages: [{ role: "user", content: prompt }],
         }),
       });
